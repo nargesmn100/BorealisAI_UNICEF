@@ -3,17 +3,19 @@ AI-Powered Resampling of Official Statistics for Disaster Forecasting
 
 ## Introduction
 
+## Applications for Impact 
+
 ## Methods
-
 ### Data
-
 ### Model Architecture
+
+## Results
+### Evaluation Metrics
+### Baselines (We compare against):
 
 ## Demo
 
-## Results
-
-## Discussion (Potential for Impact)
+## Future Work / Roadmap
 
 ## Team Information
 This initiative is part of the Spring 2026 cohort of Borealis AI's "Let's SOLVE It" program. The project team includes:
@@ -24,9 +26,10 @@ This initiative is part of the Spring 2026 cohort of Borealis AI's "Let's SOLVE 
 - [Alan Zhou](https://www.linkedin.com/in/alan-zhou-893481246/)
 <br><br>
 
+## Installation & Setup
+
 ## Repository Structure
 The repository is organized as follows:
 
 ## Citation
-
 If you use this work in your research, please cite:
