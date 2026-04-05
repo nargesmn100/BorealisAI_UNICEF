@@ -1,0 +1,161 @@
+# =============================================================================
+# UNICEF × RBC Borealis AI — Jamaica Child Deprivation Pipeline
+# Central configuration file
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Paths (relative to project root)
+# ---------------------------------------------------------------------------
+paths:
+  # Raw input data (filesystem paths — will be resolved to absolute paths)
+  raw_data_dir: "Data/Geospatial"
+  rwi_csv: "Data/Geospatial/jam_relative_wealth_index.csv"
+  population_raster: "Data/Geospatial/jam_pop_2030_CN_100m_R2025A_v1.tif"
+  smod_zip: "Data/Geospatial/GHS_SMOD_E2030_GLOBE_R2023A_54009_1000_V2_0.zip"
+  accessibility_zip: "Data/Geospatial/cit_017_accessibility_to_cities.zip"
+  access_50k_zip: "Data/Geospatial/access_50k.zip"
+  gadm_gpkg: "Data/Geospatial/gadm41_JAM.gpkg"
+  chpov_jam_cub_xlsx: "Data/Geospatial/CSV Data/ChPov_JAM_CUB.xlsx"
+  chpov_global_xlsx: "Data/Geospatial/CSV Data/Child Poverty latest estimates Feb 2026 with disaggregations.xlsx"
+
+  # Intermediate outputs
+  interim_dir: "data/interim"
+  grid_file: "data/interim/jam_base_grid.parquet"
+  grid_with_proxies_file: "data/interim/jam_grid_proxies.parquet"
+  grid_with_admin_file: "data/interim/jam_grid_admin.parquet"
+  targets_file: "data/interim/jam_targets.csv"
+  modeling_table_file: "data/interim/jam_modeling_table.parquet"
+
+  # Final outputs
+  outputs_dir: "data/outputs"
+  tables_dir: "data/outputs/tables"
+  maps_dir: "data/outputs/maps"
+  eval_dir: "data/outputs/eval"
+
+# Filenames inside zip archives (NOT filesystem paths — not resolved to absolute)
+zip_contents:
+  smod_tif_name: "GHS_SMOD_E2030_GLOBE_R2023A_54009_1000_V2_0.tif"
+  accessibility_tif_name: "accessibility_to_cities_2015_v1.0.tif"
+  access_50k_tif_name: "acc_50k.tif"
+
+# ---------------------------------------------------------------------------
+# Geospatial settings
+# ---------------------------------------------------------------------------
+geo:
+  # Working CRS — WGS84
+  crs: "EPSG:4326"
+
+  # Jamaica approximate bounding box (used for raster clipping)
+  jamaica_bbox:
+    west: -78.4
+    east: -76.2
+    south: 17.7
+    north: 18.6
+
+  # GADM layer name for parish-level boundaries
+  gadm_layer: "ADM_ADM_1"
+
+  # KMA parishes (Kingston Metropolitan Area)
+  # GID_1 codes for Kingston and Saint Andrew
+  kma_parish_gids:
+    - "JAM.3_1"   # Kingston
+    - "JAM.6_1"   # Saint Andrew
+
+  # SMOD urban threshold — cells >= this value are classified as urban
+  # SMOD classes: 30=Urban Centre, 23=Dense Urban, 22=Semi-dense, 21=Suburban
+  # 13=Rural cluster, 12=Low density rural, 11=Very low density rural
+  smod_urban_threshold: 21
+
+# ---------------------------------------------------------------------------
+# Target data settings
+# ---------------------------------------------------------------------------
+targets:
+  country_code: "JAM"
+  # Use most recent survey year
+  survey_year: 2022
+  # Subgroups to use for reconciliation (national + subnational)
+  # Subregion codes in ChPov_JAM_CUB.xlsx
+  subregion_national: "_T"
+  subregion_urban: "Urban"
+  subregion_rural: "Rural"
+  subregion_kma: "Kingston Metropolitan Area (KMA)"
+
+  # Primary target variables
+  target_severe: "Prevalence, severe child poverty (%)"
+  target_moderate: "Prevalence, moderate child poverty (%)"
+
+  # Dimension / subgroup filter for primary targets (total, no disaggregation)
+  dimension_total: "_T"
+  subgroup_total: "_T"
+
+# ---------------------------------------------------------------------------
+# Modeling settings
+# ---------------------------------------------------------------------------
+modeling:
+  # Features to use in ML model
+  features:
+    - "rwi"
+    - "population"
+    - "log_population"
+    - "smod_class"
+    - "is_urban"
+    - "travel_time_cities"
+    - "travel_time_50k"
+    - "log_travel_time_cities"
+    - "log_travel_time_50k"
+
+  # Primary target for modeling
+  primary_target: "Prevalence, moderate child poverty (%)"
+  # Secondary target
+  secondary_target: "Prevalence, severe child poverty (%)"
+
+  # Admin reconciliation zone column
+  admin_zone_col: "subregion"
+
+  # Ridge regression
+  ridge:
+    alpha_candidates: [0.01, 0.1, 1.0, 10.0, 100.0]
+    cv_folds: 5
+    random_state: 42
+
+  # Gradient boosted trees
+  gbm:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    n_jobs: -1
+
+  # Generalised Additive Model
+  gam:
+    n_splines: 10
+    lam_candidates: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+    max_iter: 100
+    random_state: 42
+
+  # Uncertainty estimation
+  uncertainty:
+    n_bootstrap: 50
+    random_state: 42
+
+# ---------------------------------------------------------------------------
+# Evaluation settings
+# ---------------------------------------------------------------------------
+evaluation:
+  metrics:
+    - "mae"
+    - "rmse"
+    - "spearman_r"
+    - "pearson_r"
+    - "rank_correlation"
+  # Number of top-N priority zones to evaluate
+  priority_k: [10, 25, 50, 100]
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
