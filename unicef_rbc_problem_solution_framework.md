@@ -65,7 +65,53 @@ Build a **constraint-aware geospatial ML pipeline** that uses high-resolution pr
 
 ---
 
-## Proposed Approach / System Design
+## ML Problem Formulation
+
+### What kind of ML problem is this?
+
+At a high level, this is a **constrained spatial downscaling and ranking problem under weak supervision**.
+
+That breaks down into four components:
+
+**1. Spatial downscaling**
+
+The input is a coarse aggregate statistic — for example, "34% of rural children are moderately poor" across a large administrative zone. The output is a fine-grained estimate of relative poverty at each grid cell (~1km resolution).
+
+This is not standard regression. The task is to disaggregate a known total into a spatial distribution, not to predict an outcome from scratch.
+
+**2. Weak supervision via proxy learning**
+
+Fine-resolution ground truth does not exist. The model is trained using:
+
+- coarse administrative aggregates as the only observed targets
+- high-resolution proxy features as the signal for inferring within-region variation
+
+The model is therefore learning a mapping from proxy signals to relative poverty distributions, not from true labeled examples of grid-level deprivation.
+
+**3. Ranking as the core objective**
+
+Prediction accuracy in the conventional sense is not the primary goal. What matters is whether the system correctly identifies the most vulnerable areas — that is, whether it produces reliable rankings for humanitarian prioritization.
+
+This makes the problem fundamentally a **ranking problem**, and evaluation metrics should reflect ranking performance (e.g., Spearman correlation, top-k recall) rather than only reconstruction error.
+
+**4. Constraint-aware structured prediction**
+
+Predictions must be consistent with trusted official statistics. Within each administrative zone, the population-weighted mean of all grid-level predictions must recover the official poverty prevalence. This is a hard constraint, not a soft regularization term.
+
+The problem is therefore: **regression with administrative consistency constraints**.
+
+---
+
+### Concrete prediction task
+
+Given proxy features for each spatial grid cell — including wealth index, settlement type, population, and accessibility — the model predicts a **relative poverty score** for each cell such that:
+
+- cells can be ranked by vulnerability
+- within each administrative zone, the population-weighted mean of predicted scores matches the known official poverty total exactly
+
+The score is not an estimate of absolute poverty. It is a relative allocation signal that, after post-processing reconciliation, produces a spatial distribution consistent with official statistics.
+
+---
 
 ### Core method (ML model? pipeline? interface?)
 The core method is a **geospatial machine learning pipeline** with post-processing reconciliation.
