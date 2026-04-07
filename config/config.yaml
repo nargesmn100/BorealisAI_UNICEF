@@ -135,10 +135,17 @@ modeling:
     max_iter: 100
     random_state: 42
 
-  # Uncertainty estimation
+  # Uncertainty estimation (bootstrap — used by Ridge)
   uncertainty:
     n_bootstrap: 50
     random_state: 42
+
+  # Conformal prediction settings (used by GBM and GAM)
+  # coverage: target marginal coverage level (0.90 = 90% CI)
+  # cal_fraction: fraction of training data held out for calibration
+  conformal:
+    coverage: 0.90
+    cal_fraction: 0.20
 
 # ---------------------------------------------------------------------------
 # Evaluation settings
