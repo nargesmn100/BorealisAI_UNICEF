@@ -77,8 +77,9 @@ The items below are polish, validation, and extension work.
 ### 2.3 Uncertainty propagation check
 - Hard reconciliation is applied after prediction, which compresses or
   stretches raw scores. This changes the uncertainty interval widths.
-- Currently, confidence intervals (ridge bootstrap, GAM bands, GBM bootstrap)
-  are computed on raw scores and are NOT propagated through reconciliation.
+- Currently, confidence intervals (ridge bootstrap, GAM Bayesian bands,
+  GAM conformal, GBM quantile regression, GBM conformal) are computed on
+  raw scores and are NOT propagated through reconciliation.
 - Consider adding a note or a scaling step so reported CI widths are
   consistent with reconciled predictions.
 - This is a known limitation -- at minimum it should be documented clearly
@@ -116,12 +117,6 @@ The items below are polish, validation, and extension work.
 - To apply to another country: supply a new RWI CSV, population raster,
   GADM boundaries, and a poverty spreadsheet, then update config paths.
 - No code changes required unless the target spreadsheet format differs.
-
-### 3.5 Quantile regression for better uncertainty (GBM)
-- Currently GBM uses bootstrap resampling for uncertainty (50 refits).
-- Native quantile regression (LightGBM objective='quantile') would be faster
-  and more statistically principled.
-- Estimated effort: ~1 hour to implement as an alternative in gbm_model.py.
 
 ---
 
