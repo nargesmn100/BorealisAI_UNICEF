@@ -17,17 +17,29 @@ Why GBM?
 - Provides native feature importance estimates (gain-based and SHAP)
 - Stronger nonlinear benchmark for comparing against ridge regression
 
-Interpretability strategy
---------------------------
-- Feature importances (gain-based) are logged
-- SHAP values are computed if shap is available
-- Partial dependence plots can be produced via the evaluate pipeline
+Uncertainty estimation
+-----------------------
+Two complementary approaches are used:
+
+1. Quantile regression (LightGBM only):
+   Train separate GBM models with objective='quantile' at alpha=0.05 and
+   alpha=0.95 to directly predict the 5th and 95th percentile of the
+   conditional distribution.  Output: gbm_moderate_lower / gbm_moderate_upper.
+
+2. Split-conformal prediction:
+   Hold out a calibration fraction of training data, fit the mean model on
+   the remainder, compute nonconformity scores (|y − ŷ|) on the calibration
+   set, and derive a coverage-guaranteed symmetric interval.
+   Output: gbm_moderate_conformal_lower / gbm_moderate_conformal_upper.
 
 Output columns:
-  gbm_raw_score           : raw GBM prediction score
-  gbm_moderate            : reconciled moderate prevalence prediction
-  gbm_severe              : reconciled severe prevalence prediction
-  gbm_moderate_upper/lower: bootstrap uncertainty bounds
+  gbm_raw_score                   : raw GBM mean prediction score
+  gbm_moderate                    : reconciled moderate prevalence prediction
+  gbm_severe                      : reconciled severe prevalence prediction
+  gbm_moderate_lower              : quantile-regression lower bound (q=0.05)
+  gbm_moderate_upper              : quantile-regression upper bound (q=0.95)
+  gbm_moderate_conformal_lower    : conformal prediction lower bound
+  gbm_moderate_conformal_upper    : conformal prediction upper bound
 """
 
 import logging
@@ -37,8 +49,45 @@ import numpy as np
 import pandas as pd
 
 from src.reconciliation.admin_reconcile import reconcile_predictions
+from src.utils.conformal import SplitConformalPredictor, calibration_split
 
 logger = logging.getLogger(__name__)
+
+
+def _get_quantile_gbm_model(cfg: dict, alpha: float):
+    """
+    Return a LightGBM quantile regression model for the given quantile level.
+
+    Only available with LightGBM backend (not XGBoost fallback).
+
+    Parameters
+    ----------
+    cfg : dict
+    alpha : float
+        Quantile level, e.g. 0.05 for lower bound, 0.95 for upper bound.
+
+    Returns
+    -------
+    lgb.LGBMRegressor configured with objective='quantile'.
+
+    Raises
+    ------
+    ImportError if LightGBM is not installed.
+    """
+    import lightgbm as lgb
+    gbm_cfg = cfg["modeling"]["gbm"]
+    return lgb.LGBMRegressor(
+        objective="quantile",
+        alpha=alpha,
+        n_estimators=gbm_cfg["n_estimators"],
+        max_depth=gbm_cfg["max_depth"],
+        learning_rate=gbm_cfg["learning_rate"],
+        subsample=gbm_cfg["subsample"],
+        colsample_bytree=gbm_cfg["colsample_bytree"],
+        random_state=gbm_cfg["random_state"],
+        n_jobs=gbm_cfg.get("n_jobs", -1),
+        verbose=-1,
+    )
 
 
 def _get_gbm_model(cfg: dict):
@@ -228,25 +277,75 @@ def run(
     )
 
     # ------------------------------------------------------------------
-    # Bootstrap uncertainty
+    # Quantile regression (LightGBM only)
+    # Trains two additional models at alpha=0.05 and alpha=0.95 to
+    # directly predict the 5th/95th percentiles of the conditional
+    # distribution, giving asymmetric, feature-aware bounds.
     # ------------------------------------------------------------------
-    n_bootstrap = uncertainty_cfg.get("n_bootstrap", 50)
-    rs = uncertainty_cfg.get("random_state", 42)
-    rng = np.random.default_rng(rs)
-
-    logger.info("Running bootstrap uncertainty (%d samples)...", n_bootstrap)
-    boot_preds = np.zeros((n_bootstrap, len(X_pred)))
-
-    for b in range(n_bootstrap):
-        idx = rng.integers(0, len(X_train), size=len(X_train))
-        m = _get_gbm_model(cfg)
-        m.fit(X_train[idx], y_train[idx])
-        boot_preds[b] = m.predict(X_pred)
-
     df["gbm_moderate_lower"] = np.nan
     df["gbm_moderate_upper"] = np.nan
-    df.loc[pred_mask, "gbm_moderate_lower"] = np.percentile(boot_preds, 5, axis=0)
-    df.loc[pred_mask, "gbm_moderate_upper"] = np.percentile(boot_preds, 95, axis=0)
+
+    try:
+        coverage = cfg["modeling"].get("conformal", {}).get("coverage", 0.90)
+        lower_alpha = (1.0 - coverage) / 2.0          # e.g. 0.05
+        upper_alpha = 1.0 - lower_alpha                # e.g. 0.95
+
+        logger.info(
+            "Fitting quantile GBM models (q=%.2f, q=%.2f)...",
+            lower_alpha, upper_alpha,
+        )
+        lower_q_model = _get_quantile_gbm_model(cfg, alpha=lower_alpha)
+        upper_q_model = _get_quantile_gbm_model(cfg, alpha=upper_alpha)
+        lower_q_model.fit(X_train, y_train)
+        upper_q_model.fit(X_train, y_train)
+
+        df.loc[pred_mask, "gbm_moderate_lower"] = lower_q_model.predict(X_pred)
+        df.loc[pred_mask, "gbm_moderate_upper"] = upper_q_model.predict(X_pred)
+        logger.info(
+            "Quantile regression intervals: mean width=%.4f pp",
+            (df["gbm_moderate_upper"] - df["gbm_moderate_lower"]).mean(),
+        )
+    except ImportError:
+        logger.warning(
+            "Quantile regression requires LightGBM. "
+            "XGBoost fallback does not support quantile objective — "
+            "gbm_moderate_lower/upper will be NaN."
+        )
+
+    # ------------------------------------------------------------------
+    # Split-conformal prediction intervals
+    # Uses a held-out calibration split to produce coverage-guaranteed
+    # symmetric intervals around the mean model's predictions.
+    # ------------------------------------------------------------------
+    conformal_cfg = cfg["modeling"].get("conformal", {})
+    coverage = conformal_cfg.get("coverage", 0.90)
+    cal_fraction = conformal_cfg.get("cal_fraction", 0.20)
+    rs = uncertainty_cfg.get("random_state", 42)
+
+    logger.info(
+        "Fitting conformal predictor (coverage=%.0f%%, cal_fraction=%.0f%%)...",
+        coverage * 100, cal_fraction * 100,
+    )
+    X_train_fit, X_cal, y_train_fit, y_cal = calibration_split(
+        X_train, y_train, cal_fraction=cal_fraction, random_state=rs
+    )
+    conformal_model = _get_gbm_model(cfg)
+    conformal_model.fit(X_train_fit, y_train_fit)
+    y_hat_cal = conformal_model.predict(X_cal)
+
+    conformal = SplitConformalPredictor(coverage=coverage)
+    conformal.calibrate(y_cal, y_hat_cal)
+
+    # Re-use the already-predicted raw_preds from the full-data model
+    conformal_lower, conformal_upper = conformal.predict_intervals(raw_preds)
+    df["gbm_moderate_conformal_lower"] = np.nan
+    df["gbm_moderate_conformal_upper"] = np.nan
+    df.loc[pred_mask, "gbm_moderate_conformal_lower"] = conformal_lower
+    df.loc[pred_mask, "gbm_moderate_conformal_upper"] = conformal_upper
+    logger.info(
+        "Conformal intervals: q̂=%.4f pp, interval width=%.4f pp",
+        conformal.q_hat, conformal.interval_width,
+    )
 
     logger.info("GBM model complete.")
     return df, model, fi_df
