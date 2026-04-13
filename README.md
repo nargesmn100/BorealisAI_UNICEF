@@ -9,12 +9,8 @@ A research-first geospatial ML pipeline that reconstructs grid-level patterns of
 
 ## Introduction
 
-Humanitarian systems need to identify *where* vulnerable children are at fine spatial resolution — especially during climate emergencies. But official child poverty data are only available at coarse administrative levels.
-
-This system bridges that gap by:
-1. Using high-resolution proxy data (wealth index, population, settlement type, travel time) to infer within-region deprivation patterns
-2. Enforcing consistency with official administrative totals via hard reconciliation
-3. Comparing ML approaches against redistribution baselines to determine when models add genuine value
+For the problem statement, ML formulation, and evaluation framework, see
+[`docs/problem_statement.pdf`](docs/problem_statement.pdf).
 
 ---
 
@@ -146,9 +142,10 @@ BorealisAI_UNICEF/
 ├── Data/Geospatial/             # Raw input data files
 ├── main.py                      # Main entry point
 ├── requirements.txt
+├── docs/
+│   └── problem_statement.pdf        # Problem statement and evaluation framework
 ├── PROJECT-BREAKDOWN.md
-├── unicef_rbc_project_understanding.md
-└── unicef_rbc_problem_solution_framework.md
+└── unicef_rbc_project_understanding.md  # Data inventory and technical notes
 ```
 
 ---
