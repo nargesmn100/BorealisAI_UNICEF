@@ -229,6 +229,42 @@ Compared grid predictions to actual household consumption from 4,976 GPS-surveye
 
 ---
 
+## Interactive Visualization
+
+The `visualization/` directory contains a standalone Next.js app that explains the pipeline through an interactive spatial demo — useful for presentations, stakeholder briefings, or onboarding new collaborators.
+
+### What it shows
+
+- **Coarse regions view** — 5 stylised administrative regions colored by official poverty score, with region names and survey values labeled directly on the map
+- **Fine grid view** — the same territory broken into hundreds of grid cells, each colored by its predicted vulnerability score; hover any cell to see its full feature profile (night lights, building density, accessibility, settlement type, population)
+- **Overlay view** — coarse region fills + cell grid simultaneously, with a blue outline on the selected region
+- **Aggregation panel** — when a region is selected, shows the formula `Ŷ_region = Σ(ŷᵢ × popᵢ) / Σ(popᵢ)` with real numbers, comparing the population-weighted cell average against the official survey figure
+- **Resolution toggle** — switch between coarse / medium / fine grid (~140 / 315 / 560 cells) to simulate different prediction resolutions
+
+### Running it
+
+```bash
+cd visualization
+npm install       # first time only
+npm run dev
+```
+
+Then open **http://localhost:3000** in your browser.
+
+> No Python environment, no data downloads. The app uses fully synthetic data generated in-code and runs entirely in the browser.
+
+### Building for production / sharing
+
+```bash
+cd visualization
+npm run build
+npm run start     # serves the optimised build locally
+```
+
+Or deploy the `visualization/` folder to any static host (Vercel, Netlify, GitHub Pages via `next export`).
+
+---
+
 ## Running Tests
 
 ```bash
@@ -284,6 +320,10 @@ BorealisAI_UNICEF/
 ├── tests/                         # pytest test suite
 ├── notebooks/
 │   └── 01_analysis.ipynb          # Exploratory analysis notebook
+├── visualization/                 # Interactive Next.js demo app (see above)
+│   ├── app/                       # Next.js app-router pages + layout
+│   ├── components/                # PovertyMapSVG, Legend, AggregationPanel, etc.
+│   └── lib/data.ts                # Synthetic data generation + color scale
 ├── main.py                        # Main entry point
 ├── requirements.txt
 └── PROJECT_STATUS.md              # Detailed project status and next steps
