@@ -1,0 +1,13 @@
+train_level,eval_level,model,reconciled,n_groups,mae_pp,rmse_pp,pearson_r,spearman_r
+geopolitical_zone,state,ridge,False,36,13.3,14.97,0.598,0.623
+geopolitical_zone,state,ridge,True,36,11.633,15.504,0.489,0.474
+geopolitical_zone,state,gbm,False,36,11.284,15.247,0.5,0.505
+geopolitical_zone,state,gbm,True,36,11.234,15.288,0.502,0.505
+geopolitical_zone,state_urban_rural,ridge,False,72,18.879,20.926,0.271,0.315
+geopolitical_zone,state_urban_rural,ridge,True,72,18.962,22.776,0.184,0.189
+geopolitical_zone,state_urban_rural,gbm,False,72,18.616,22.232,0.205,0.244
+geopolitical_zone,state_urban_rural,gbm,True,72,18.641,22.291,0.206,0.243
+state,state_urban_rural,ridge,False,72,15.731,18.625,0.491,0.503
+state,state_urban_rural,ridge,True,72,13.987,18.894,0.526,0.538
+state,state_urban_rural,gbm,False,72,14.647,19.515,0.495,0.5
+state,state_urban_rural,gbm,True,72,14.647,19.568,0.496,0.502

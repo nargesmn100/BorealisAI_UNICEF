@@ -205,10 +205,35 @@ def run(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
     moderate_col = "moderate_prevalence"
     severe_col = "severe_prevalence"
 
-    return apply_rwi_baseline(
+    df = apply_rwi_baseline(
         df,
         zone_col=zone_col,
         moderate_target_col=moderate_col,
         severe_target_col=severe_col,
         strategy="inverted_rwi",
     )
+
+    # Depth metrics — reconcile same raw scores to depth targets
+    if "moderate_depth" in df.columns and "rwi_raw_score" in df.columns:
+        logger.info("Reconciling RWI baseline to moderate depth targets...")
+        df = reconcile_predictions(
+            df,
+            raw_score_col="rwi_raw_score",
+            target_col="moderate_depth",
+            zone_col=zone_col,
+            population_col="population",
+            output_col="rwi_moderate_depth",
+            strategy="population_weighted",
+        )
+        logger.info("Reconciling RWI baseline to severe depth targets...")
+        df = reconcile_predictions(
+            df,
+            raw_score_col="rwi_raw_score",
+            target_col="severe_depth",
+            zone_col=zone_col,
+            population_col="population",
+            output_col="rwi_severe_depth",
+            strategy="population_weighted",
+        )
+
+    return df

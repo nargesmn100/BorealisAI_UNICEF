@@ -40,6 +40,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,149 @@ def ci_coverage_width(
 
 
 # ---------------------------------------------------------------------------
+# Non-circular evaluation metrics
+# ---------------------------------------------------------------------------
+
+def spatial_smoothness(
+    lons: np.ndarray,
+    lats: np.ndarray,
+    values: np.ndarray,
+    k: int = 8,
+) -> float:
+    """
+    Measure spatial autocorrelation via KNN neighbor correlation.
+
+    For each cell, computes the mean value of its k nearest neighbors, then
+    returns the Pearson correlation between cell values and neighbor means.
+    Higher values indicate spatially smoother (more coherent) predictions.
+
+    Parameters
+    ----------
+    lons, lats : np.ndarray
+        Coordinates.
+    values : np.ndarray
+        Prediction values.
+    k : int
+        Number of nearest neighbors.
+
+    Returns
+    -------
+    float
+        Pearson r between values and spatial lag (neighbor mean).
+    """
+    valid = ~np.isnan(values)
+    if valid.sum() < k + 1:
+        return np.nan
+
+    coords = np.column_stack([lons[valid], lats[valid]])
+    vals = values[valid]
+    tree = cKDTree(coords)
+
+    # k+1 because the first neighbor is the point itself
+    distances, indices = tree.query(coords, k=k + 1)
+    # Exclude self (index 0), take mean of neighbors
+    neighbor_means = np.mean(vals[indices[:, 1:]], axis=1)
+
+    r, _ = stats.pearsonr(vals, neighbor_means)
+    return float(r)
+
+
+def multi_proxy_agreement(
+    df: pd.DataFrame,
+    pred_col: str,
+) -> dict:
+    """
+    Compute Spearman correlations between predictions and non-RWI proxies.
+
+    This provides non-circular evaluation metrics (unlike RWI correlation which
+    is circular for the RWI baseline).
+
+    Expected correlations for deprivation predictions:
+    - travel_time_cities: positive (remote areas → more deprived)
+    - smod_class: negative (urban areas → less deprived)
+    - population: negative (populated areas → less deprived, generally)
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    pred_col : str
+
+    Returns
+    -------
+    dict
+        Keys: proxy_r_travel_time, proxy_r_smod, proxy_r_population
+    """
+    pred = df[pred_col].values.astype(float)
+    result = {}
+
+    proxy_cols = {
+        "travel_time_cities": "proxy_r_travel_time",
+        "smod_class": "proxy_r_smod",
+        "population": "proxy_r_population",
+    }
+
+    for col, key in proxy_cols.items():
+        if col not in df.columns:
+            result[key] = np.nan
+            continue
+        proxy = df[col].values.astype(float)
+        mask = ~(np.isnan(pred) | np.isnan(proxy))
+        if mask.sum() < 3:
+            result[key] = np.nan
+            continue
+        r, _ = stats.spearmanr(pred[mask], proxy[mask])
+        result[key] = float(r)
+
+    return result
+
+
+def within_zone_variation(
+    df: pd.DataFrame,
+    pred_col: str,
+    zone_col: str = "subregion",
+) -> dict:
+    """
+    Compute coefficient of variation (CV) of predictions within each zone.
+
+    Uniform allocation gives CV=0. Methods with meaningful spatial variation
+    should have higher CV, indicating they differentiate within zones.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    pred_col : str
+    zone_col : str
+
+    Returns
+    -------
+    dict
+        Keys: cv_{zone_name} and cv_overall
+    """
+    result = {}
+    valid = df[pred_col].notna() & (df[zone_col] != "Unknown")
+
+    for zone in sorted(df.loc[valid, zone_col].unique()):
+        zmask = valid & (df[zone_col] == zone)
+        vals = df.loc[zmask, pred_col].values
+        if len(vals) < 2 or np.mean(vals) == 0:
+            cv = 0.0
+        else:
+            cv = float(np.std(vals) / np.abs(np.mean(vals)))
+        # Sanitize zone name for column key
+        zone_key = zone.lower().replace(" ", "_").replace("(", "").replace(")", "")
+        result[f"cv_{zone_key}"] = cv
+
+    # Overall CV
+    all_vals = df.loc[valid, pred_col].values
+    if len(all_vals) > 1 and np.mean(all_vals) != 0:
+        result["cv_overall"] = float(np.std(all_vals) / np.abs(np.mean(all_vals)))
+    else:
+        result["cv_overall"] = 0.0
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Full evaluation runner
 # ---------------------------------------------------------------------------
 
@@ -283,12 +427,32 @@ def evaluate_all(
             )
 
         # ----------------------------------------------------------------
+        # Spatial smoothness
+        # ----------------------------------------------------------------
+        smoothness = spatial_smoothness(
+            df["longitude"].values, df["latitude"].values, pred_vals,
+        )
+
+        # ----------------------------------------------------------------
+        # Multi-proxy agreement (non-circular)
+        # ----------------------------------------------------------------
+        proxy_results = multi_proxy_agreement(df, pred_col)
+
+        # ----------------------------------------------------------------
+        # Within-zone variation
+        # ----------------------------------------------------------------
+        cv_results = within_zone_variation(df, pred_col, zone_col)
+
+        # ----------------------------------------------------------------
         # Compile results
         # ----------------------------------------------------------------
         method_results = {
             "admin_mae_mean_pp": mean_admin_mae,
             "pearson_r_vs_neg_rwi": pearson_pred_rwi,
             "spearman_r_vs_neg_rwi": spearman_pred_rwi,
+            "spatial_smoothness": smoothness,
+            **proxy_results,
+            **cv_results,
             **top_k_results,
             **{f"ci_{k}": v for k, v in ci_stats.items()},
             "admin_detail": admin_err_df,
@@ -296,8 +460,8 @@ def evaluate_all(
         results[method] = method_results
 
         logger.info(
-            "Method %-20s | admin_mae=%.4f pp | pearson(pred,−RWI)=%.3f | spearman=%.3f",
-            method, mean_admin_mae, pearson_pred_rwi, spearman_pred_rwi,
+            "Method %-20s | admin_mae=%.4f pp | pearson(pred,−RWI)=%.3f | spearman=%.3f | smoothness=%.3f",
+            method, mean_admin_mae, pearson_pred_rwi, spearman_pred_rwi, smoothness,
         )
 
     # ----------------------------------------------------------------
@@ -305,18 +469,59 @@ def evaluate_all(
     # ----------------------------------------------------------------
     logger.info("\n=== Evaluation Summary ===")
     logger.info(
-        "%-20s | %12s | %12s | %12s",
-        "Method", "admin_MAE(pp)", "pearson(−RWI)", "spearman(−RWI)"
+        "%-20s | %12s | %12s | %12s | %10s | %10s | %10s",
+        "Method", "admin_MAE(pp)", "pearson(−RWI)", "spearman(−RWI)",
+        "smoothness", "proxy_r_tt", "cv_overall",
     )
-    logger.info("-" * 65)
+    logger.info("-" * 100)
     for method, res in results.items():
         logger.info(
-            "%-20s | %12.4f | %12.3f | %12.3f",
+            "%-20s | %12.4f | %12.3f | %12.3f | %10.3f | %10.3f | %10.3f",
             method,
             res.get("admin_mae_mean_pp", np.nan),
             res.get("pearson_r_vs_neg_rwi", np.nan),
             res.get("spearman_r_vs_neg_rwi", np.nan),
+            res.get("spatial_smoothness", np.nan),
+            res.get("proxy_r_travel_time", np.nan),
+            res.get("cv_overall", np.nan),
         )
+
+    # ----------------------------------------------------------------
+    # Depth metric evaluation
+    # ----------------------------------------------------------------
+    depth_methods = {}
+    for col in df.columns:
+        if col.endswith("_moderate_depth") and not col.endswith("_lower") and not col.endswith("_upper"):
+            method = col.replace("_moderate_depth", "")
+            depth_methods[method] = col
+
+    if depth_methods and "moderate_depth" in df.columns:
+        logger.info("\n=== Depth Metric Evaluation ===")
+        for method, pred_col in depth_methods.items():
+            if pred_col not in df.columns:
+                continue
+            pred_vals = df[pred_col].values.astype(float)
+            rwi_vals = df["rwi"].values.astype(float)
+
+            admin_err_df = admin_consistency_error(
+                df, pred_col, "moderate_depth", zone_col, pop_col,
+            )
+            mean_admin_mae_d = admin_err_df["abs_error"].mean() if len(admin_err_df) > 0 else np.nan
+            pearson_pred_rwi_d = pearson_r(-rwi_vals, pred_vals)
+            spearman_pred_rwi_d = spearman_r(-rwi_vals, pred_vals)
+
+            depth_key = f"{method}_depth"
+            results[depth_key] = {
+                "admin_mae_mean_pp": mean_admin_mae_d,
+                "pearson_r_vs_neg_rwi": pearson_pred_rwi_d,
+                "spearman_r_vs_neg_rwi": spearman_pred_rwi_d,
+                "admin_detail": admin_err_df,
+                "metric_type": "depth",
+            }
+            logger.info(
+                "Method %-20s | admin_mae=%.4f | pearson=%.3f | spearman=%.3f",
+                depth_key, mean_admin_mae_d, pearson_pred_rwi_d, spearman_pred_rwi_d,
+            )
 
     logger.info(
         "\nIMPORTANT CAVEAT: Metrics compare predictions against RWI as a proxy "
@@ -326,6 +531,157 @@ def evaluate_all(
     )
 
     return results
+
+
+def paired_significance_tests(
+    df: pd.DataFrame,
+    cfg: dict,
+) -> pd.DataFrame:
+    """
+    Test whether ML methods significantly differ from the RWI baseline
+    using Wilcoxon signed-rank test on per-cell absolute error differences,
+    and bootstrap CIs for difference in Spearman r.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    cfg : dict
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: method_pair, test_statistic, p_value, direction, ci_lower, ci_upper
+    """
+    if "rwi_moderate" not in df.columns:
+        logger.warning("RWI baseline not found. Skipping significance tests.")
+        return pd.DataFrame()
+
+    rwi_vals = df["rwi"].values.astype(float)
+    neg_rwi = -rwi_vals
+    rwi_preds = df["rwi_moderate"].values.astype(float)
+
+    ml_methods = []
+    for col in df.columns:
+        if col.endswith("_moderate") and col not in [
+            "rwi_moderate", "uniform_moderate",
+        ] and not col.endswith("_lower") and not col.endswith("_upper") and not col.endswith("_depth"):
+            ml_methods.append(col)
+
+    rows = []
+    valid_base = ~(np.isnan(rwi_preds) | np.isnan(neg_rwi))
+
+    for ml_col in ml_methods:
+        ml_preds = df[ml_col].values.astype(float)
+        valid = valid_base & ~np.isnan(ml_preds)
+        if valid.sum() < 10:
+            continue
+
+        # Per-cell |error| vs -RWI proxy
+        rwi_errors = np.abs(rwi_preds[valid] - neg_rwi[valid])
+        ml_errors = np.abs(ml_preds[valid] - neg_rwi[valid])
+        diff = rwi_errors - ml_errors  # positive = ML is better
+
+        try:
+            stat, p_val = stats.wilcoxon(diff, alternative="two-sided")
+        except ValueError:
+            stat, p_val = np.nan, np.nan
+
+        direction = "ml_better" if np.median(diff) > 0 else "rwi_better"
+
+        # Bootstrap CI for Spearman r difference
+        rng = np.random.default_rng(42)
+        n = valid.sum()
+        rwi_sp = spearman_r(neg_rwi[valid], rwi_preds[valid])
+        ml_sp = spearman_r(neg_rwi[valid], ml_preds[valid])
+
+        boot_diffs = []
+        for _ in range(1000):
+            idx = rng.integers(0, n, size=n)
+            sp_rwi_b = spearman_r(neg_rwi[valid][idx], rwi_preds[valid][idx])
+            sp_ml_b = spearman_r(neg_rwi[valid][idx], ml_preds[valid][idx])
+            boot_diffs.append(sp_ml_b - sp_rwi_b)
+
+        boot_diffs = np.array(boot_diffs)
+        ci_lower = float(np.percentile(boot_diffs, 2.5))
+        ci_upper = float(np.percentile(boot_diffs, 97.5))
+
+        method_name = ml_col.replace("_moderate", "")
+        rows.append({
+            "method_pair": f"{method_name}_vs_rwi",
+            "test_statistic": float(stat) if not np.isnan(stat) else None,
+            "p_value": float(p_val) if not np.isnan(p_val) else None,
+            "direction": direction,
+            "spearman_diff": ml_sp - rwi_sp,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+        })
+
+    result = pd.DataFrame(rows)
+    if len(result) > 0:
+        logger.info("Significance tests:\n%s", result.to_string(index=False))
+    return result
+
+
+def rwi_uncertainty_analysis(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Analyse the relationship between RWI posterior uncertainty (rwi_error)
+    and prediction CI widths.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary statistics by zone and overall.
+    """
+    if "rwi_error" not in df.columns:
+        logger.warning("rwi_error column not found. Skipping RWI uncertainty analysis.")
+        return pd.DataFrame()
+
+    valid = df["in_modeling_sample"].fillna(False) & df["rwi_error"].notna()
+    rows = []
+
+    # Per-zone stats
+    for zone in sorted(df.loc[valid, "subregion"].unique()):
+        zmask = valid & (df["subregion"] == zone)
+        rwi_err = df.loc[zmask, "rwi_error"].values
+        row = {
+            "zone": zone,
+            "n_cells": int(zmask.sum()),
+            "mean_rwi_error": float(rwi_err.mean()),
+            "median_rwi_error": float(np.median(rwi_err)),
+            "high_uncertainty_count": int((rwi_err > 0.6).sum()),
+        }
+
+        # CI width correlation if available
+        for prefix in ["ridge", "gam", "gbm"]:
+            lower_col = f"{prefix}_moderate_lower"
+            upper_col = f"{prefix}_moderate_upper"
+            if lower_col in df.columns and upper_col in df.columns:
+                ci_width = (df.loc[zmask, upper_col] - df.loc[zmask, lower_col]).values
+                ci_valid = ~np.isnan(ci_width)
+                if ci_valid.sum() > 3:
+                    corr, _ = stats.pearsonr(rwi_err[ci_valid], ci_width[ci_valid])
+                    row[f"{prefix}_ci_width_corr"] = float(corr)
+
+        rows.append(row)
+
+    # Overall
+    rwi_err_all = df.loc[valid, "rwi_error"].values
+    overall = {
+        "zone": "ALL",
+        "n_cells": int(valid.sum()),
+        "mean_rwi_error": float(rwi_err_all.mean()),
+        "median_rwi_error": float(np.median(rwi_err_all)),
+        "high_uncertainty_count": int((rwi_err_all > 0.6).sum()),
+    }
+    rows.append(overall)
+
+    result = pd.DataFrame(rows)
+    logger.info("RWI uncertainty analysis:\n%s", result.to_string(index=False))
+    return result
 
 
 def format_eval_report(results: dict) -> pd.DataFrame:

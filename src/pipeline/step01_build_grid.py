@@ -80,21 +80,22 @@ def build_base_grid(cfg: dict) -> pd.DataFrame:
     logger.info("Latitude range:  %.4f  –  %.4f", *lat_range)
     logger.info("Longitude range: %.4f  –  %.4f", *lon_range)
 
-    # Crude bounding-box check for Jamaica
-    jam_bbox = cfg["geo"]["jamaica_bbox"]
-    if lat_range[0] < jam_bbox["south"] or lat_range[1] > jam_bbox["north"]:
+    # Crude bounding-box check
+    country_name = cfg.get("country", {}).get("name", "country")
+    bbox = cfg["geo"]["bbox"]
+    if lat_range[0] < bbox["south"] or lat_range[1] > bbox["north"]:
         logger.warning(
-            "Latitude range (%.4f, %.4f) partially outside Jamaica bbox "
+            "Latitude range (%.4f, %.4f) partially outside %s bbox "
             "(%.4f, %.4f). Verify input data.",
             lat_range[0], lat_range[1],
-            jam_bbox["south"], jam_bbox["north"],
+            country_name, bbox["south"], bbox["north"],
         )
-    if lon_range[0] < jam_bbox["west"] or lon_range[1] > jam_bbox["east"]:
+    if lon_range[0] < bbox["west"] or lon_range[1] > bbox["east"]:
         logger.warning(
-            "Longitude range (%.4f, %.4f) partially outside Jamaica bbox "
+            "Longitude range (%.4f, %.4f) partially outside %s bbox "
             "(%.4f, %.4f). Verify input data.",
             lon_range[0], lon_range[1],
-            jam_bbox["west"], jam_bbox["east"],
+            country_name, bbox["west"], bbox["east"],
         )
 
     rwi_stats = grid["rwi"].describe()

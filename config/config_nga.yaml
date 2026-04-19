@@ -1,0 +1,203 @@
+# =============================================================================
+# UNICEF × RBC Borealis AI — Nigeria Child Deprivation Pipeline
+# =============================================================================
+
+country:
+  code: "NGA"
+  name: "Nigeria"
+  output_prefix: "nga"
+
+# ---------------------------------------------------------------------------
+# Paths (relative to project root — resolved to absolute at load time)
+# ---------------------------------------------------------------------------
+paths:
+  raw_data_dir: "Data/Nigeria"
+
+  # Base geospatial data
+  rwi_csv:             "Data/Nigeria/nga_relative_wealth_index.csv"
+  population_raster:   "Data/Nigeria/nga_ppp_2020_constrained.tif"
+  gadm_gpkg:           "Data/Nigeria/gadm41_NGA.gpkg"
+  gadm_file:           "Data/Nigeria/gadm41_NGA.gpkg"
+
+  # Optional rasters (pipeline skips gracefully if missing)
+  nightlights_raster:  "Data/Nigeria/features/nightlights/viirs_ntl_2019_nga.tif"
+
+  # Enrichment features parquet (nightlights, schools, conflict, rainfall, GHSL, etc.)
+  new_features_parquet: "Data/Nigeria/features/nga_new_features.parquet"
+
+  # MICS6 microdata directory
+  mics_data_dir: "Data/Nigeria/Nigeria MICS6 SPSS Datasets"
+
+  # Intermediate outputs (all cached — delete to force re-run a step)
+  interim_dir:           "Data/interim/nga"
+  grid_file:             "Data/interim/nga/nga_base_grid.parquet"
+  grid_with_proxies_file: "Data/interim/nga/nga_grid_proxies.parquet"
+  grid_with_admin_file:  "Data/interim/nga/nga_grid_admin.parquet"
+  targets_file:          "Data/interim/nga/nga_targets.csv"
+  modeling_table_file:   "Data/interim/nga/nga_modeling_table.parquet"
+
+  # Final outputs
+  outputs_dir: "Data/outputs/nga"
+  tables_dir:  "Data/outputs/nga/tables"
+  maps_dir:    "Data/outputs/nga/maps"
+  eval_dir:    "Data/outputs/nga/eval"
+
+# ---------------------------------------------------------------------------
+# Geospatial settings
+# ---------------------------------------------------------------------------
+geo:
+  crs: "EPSG:4326"
+
+  # Nigeria bounding box
+  bbox:
+    west:  2.67
+    east:  14.68
+    south: 4.26
+    north: 13.87
+
+  # GADM layer — ADM1 = states (37)
+  gadm_layer: "ADM_ADM_1"
+
+  # Subregion strategy: use GADM state name directly as subregion
+  subregion_strategy: "admin_level1"
+
+  # SMOD urban threshold
+  smod_urban_threshold: 21
+
+  population_imputation:
+    method: "median_smod"
+    min_value: 1.0
+
+# ---------------------------------------------------------------------------
+# Target data settings
+# ---------------------------------------------------------------------------
+targets:
+  country_code: "NGA"
+  target_source: "mics_spss"
+
+  # Primary target variables (column names produced by compute_mics_deprivation)
+  primary_target:   "moderate_prevalence"
+  secondary_target: "severe_prevalence"
+
+  # Admin reconciliation zone column
+  admin_zone_col: "subregion"
+
+  # National subregion placeholder
+  subregion_national: "_T"
+
+# ---------------------------------------------------------------------------
+# Modeling settings
+# ---------------------------------------------------------------------------
+modeling:
+  # All 21 features (19 original + 2 GHSL)
+  features:
+    - "rwi"
+    - "population"
+    - "log_population"
+    - "smod_class"
+    - "is_urban"
+    - "travel_time_cities"
+    - "travel_time_50k"
+    - "log_travel_time_cities"
+    - "log_travel_time_50k"
+    - "nightlights"
+    - "log_nightlights"
+    - "building_density"
+    - "log_building_density"
+    - "dist_school_km"
+    - "dist_health_km"
+    - "conflict_events"
+    - "conflict_fatalities"
+    - "rainfall_mm"
+    - "ghsl_built_frac"
+    - "log_ghsl_built"
+
+  primary_target:   "moderate_prevalence"
+  secondary_target: "severe_prevalence"
+
+  admin_zone_col: "subregion"
+
+  # Ridge regression
+  ridge:
+    alpha_candidates: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+    cv_folds: 5
+    random_state: 42
+
+  # Gradient boosted trees
+  gbm:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    n_jobs: -1
+
+  # Generalised Additive Model
+  gam:
+    n_splines: 10
+    lam_candidates: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+    max_iter: 100
+    random_state: 42
+
+  # Uncertainty estimation (bootstrap — Ridge)
+  uncertainty:
+    n_bootstrap: 50
+    random_state: 42
+
+  # Weakly supervised neural network
+  weakly_supervised:
+    linear:
+      l2_reg: 1.0
+      random_state: 42
+    mlp:
+      hidden_size: 32
+      l2_reg: 0.01
+      max_iter: 3000
+      random_state: 42
+    n_importance_repeats: 30
+
+  # Conformal prediction (GBM / GAM)
+  conformal:
+    coverage: 0.90
+    cal_fraction: 0.20
+
+# ---------------------------------------------------------------------------
+# Evaluation settings
+# ---------------------------------------------------------------------------
+evaluation:
+  metrics:
+    - "mae"
+    - "rmse"
+    - "spearman_r"
+    - "pearson_r"
+    - "rank_correlation"
+  priority_k: [10, 25, 50, 100]
+
+  # Two-level cross-validation
+  two_level_cv:
+    enabled: true
+    max_folds: 10
+
+  # Hierarchical Cross-Level Validation
+  # Trains at a coarse level, evaluates whether predictions aggregate correctly
+  # to a finer level that was never supervised during training.
+  hierarchical_cv:
+    enabled: true
+    models:
+      - "ridge"
+      - "gbm"
+    experiments:
+      - train_level: "geopolitical_zone"
+        eval_level:  "state"
+      - train_level: "geopolitical_zone"
+        eval_level:  "state_urban_rural"
+      - train_level: "state"
+        eval_level:  "state_urban_rural"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
