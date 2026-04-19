@@ -128,6 +128,39 @@ secrets.json
 *.key
 
 # -----------------------------------------------------------------------------
+# Next.js visualization app (visualization/)
+# -----------------------------------------------------------------------------
+
+# Node dependencies
+visualization/node_modules/
+visualization/.pnp
+visualization/.pnp.js
+
+# Next.js build output
+visualization/.next/
+visualization/out/
+
+# Next.js cache
+visualization/.next/cache/
+
+# Environment files inside visualization
+visualization/.env
+visualization/.env.*
+visualization/.env.local
+visualization/.env.development.local
+visualization/.env.test.local
+visualization/.env.production.local
+
+# Next.js type declarations (auto-generated)
+visualization/next-env.d.ts
+
+# npm / yarn / pnpm debug logs
+visualization/npm-debug.log*
+visualization/yarn-debug.log*
+visualization/yarn-error.log*
+visualization/.pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
 # Misc
 # -----------------------------------------------------------------------------
 *.bak
