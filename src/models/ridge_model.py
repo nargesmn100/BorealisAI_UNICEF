@@ -52,7 +52,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score
 
-from src.reconciliation.admin_reconcile import reconcile_predictions
+from src.reconciliation.admin_reconcile import reconcile_predictions, reconcile_uncertainty_bounds
+from src.utils.config_loader import get_available_features
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ def run(
     (pd.DataFrame, RidgeDeprivationModel)
         Enriched DataFrame and the fitted model.
     """
-    feature_cols = cfg["modeling"]["features"]
+    feature_cols = get_available_features(cfg, df)
     # Use the renamed column names from the modeling table (not raw Excel names)
     target_moderate = "moderate_prevalence"
     target_severe = "severe_prevalence"
@@ -263,6 +264,9 @@ def run(
     pop_col = "population"
     ridge_cfg = cfg["modeling"]["ridge"]
     uncertainty_cfg = cfg["modeling"]["uncertainty"]
+
+    use_rwi_prior = ridge_cfg.get("use_rwi_prior", False)
+    use_quintile_target = ridge_cfg.get("use_quintile_target", False)
 
     # ------------------------------------------------------------------
     # Prepare training data
@@ -286,7 +290,67 @@ def run(
         )
 
     X_train = df.loc[train_mask, feature_cols].values.astype(float)
-    y_train = df.loc[train_mask, target_moderate].values.astype(float)
+
+    # ------------------------------------------------------------------
+    # Select training target
+    # ------------------------------------------------------------------
+    if use_quintile_target and "quintile_target_moderate" in df.columns:
+        qt_valid = df.loc[train_mask, "quintile_target_moderate"].notna()
+        if qt_valid.sum() > 10:
+            y_train = df.loc[train_mask, "quintile_target_moderate"].values.astype(float)
+            logger.info(
+                "Using quintile pseudo-targets for training (%d cells). "
+                "Range: [%.1f%%, %.1f%%]",
+                len(y_train), np.nanmin(y_train), np.nanmax(y_train),
+            )
+        else:
+            y_train = df.loc[train_mask, target_moderate].values.astype(float)
+            logger.info("Quintile targets insufficient. Falling back to zone-level targets.")
+    else:
+        y_train = df.loc[train_mask, target_moderate].values.astype(float)
+        if use_quintile_target:
+            logger.info("quintile_target_moderate column not found. Using zone-level targets.")
+
+    # ------------------------------------------------------------------
+    # RWI prior: compute prior and train on residuals
+    # ------------------------------------------------------------------
+    rwi_prior_train = None
+    rwi_prior_pred = None
+
+    if use_rwi_prior and "rwi" in df.columns:
+        logger.info("Computing RWI-based prior for Ridge residual training...")
+        rwi_all = df["rwi"].values.astype(float)
+
+        # Prior: exp(-rwi) — higher deprivation for lower wealth
+        raw_prior = np.exp(-rwi_all)
+
+        # Normalize per zone so zone-level weighted mean matches zone target
+        pred_mask_temp = feature_mask & (df["subregion"] != "Unknown")
+        rwi_prior_full = np.full(len(df), np.nan)
+
+        for zone in df.loc[pred_mask_temp, zone_col].unique():
+            zmask = pred_mask_temp & (df[zone_col] == zone)
+            zone_prior = raw_prior[zmask]
+            zone_pop = df.loc[zmask, pop_col].values.astype(float)
+            zone_pop = np.where(np.isnan(zone_pop) | (zone_pop <= 0), 1e-6, zone_pop)
+            zone_target = df.loc[zmask, target_moderate].iloc[0]
+
+            # Rescale so pop-weighted mean = zone target
+            weighted_mean = np.average(zone_prior, weights=zone_pop)
+            if weighted_mean > 0:
+                rwi_prior_full[zmask] = zone_prior * (zone_target / weighted_mean)
+            else:
+                rwi_prior_full[zmask] = zone_target
+
+        rwi_prior_train = rwi_prior_full[train_mask]
+        y_train = y_train - rwi_prior_train
+        logger.info(
+            "RWI prior computed. Residual range: [%.3f, %.3f], mean=%.4f",
+            y_train.min(), y_train.max(), y_train.mean(),
+        )
+    else:
+        if use_rwi_prior:
+            logger.info("RWI column not found. Skipping RWI prior.")
 
     # ------------------------------------------------------------------
     # Fit model
@@ -310,6 +374,15 @@ def run(
     X_pred = df.loc[pred_mask, feature_cols].values.astype(float)
 
     raw_preds = model.predict(X_pred)
+
+    # Add RWI prior back to get final raw scores
+    if rwi_prior_train is not None:
+        rwi_prior_pred = rwi_prior_full[pred_mask]
+        raw_preds = raw_preds + rwi_prior_pred
+        logger.info(
+            "RWI prior added back. Final raw prediction range: [%.3f, %.3f]",
+            raw_preds.min(), raw_preds.max(),
+        )
 
     df = df.copy()
     df["ridge_raw_score"] = np.nan
@@ -344,6 +417,22 @@ def run(
     )
 
     # ------------------------------------------------------------------
+    # Reconcile depth metrics (same raw score, different targets)
+    # ------------------------------------------------------------------
+    if "moderate_depth" in df.columns:
+        logger.info("Reconciling ridge predictions to depth targets...")
+        df = reconcile_predictions(
+            df, raw_score_col="ridge_raw_score", target_col="moderate_depth",
+            zone_col=zone_col, population_col=pop_col,
+            output_col="ridge_moderate_depth", strategy="population_weighted",
+        )
+        df = reconcile_predictions(
+            df, raw_score_col="ridge_raw_score", target_col="severe_depth",
+            zone_col=zone_col, population_col=pop_col,
+            output_col="ridge_severe_depth", strategy="population_weighted",
+        )
+
+    # ------------------------------------------------------------------
     # Bootstrap uncertainty estimation
     # ------------------------------------------------------------------
     n_bootstrap = uncertainty_cfg.get("n_bootstrap", 50)
@@ -368,6 +457,17 @@ def run(
     df["ridge_moderate_upper"] = np.nan
     df.loc[pred_mask, "ridge_moderate_lower"] = lower_raw
     df.loc[pred_mask, "ridge_moderate_upper"] = upper_raw
+
+    # Propagate uncertainty bounds through reconciliation
+    df = reconcile_uncertainty_bounds(
+        df,
+        lower_col="ridge_moderate_lower",
+        upper_col="ridge_moderate_upper",
+        raw_col="ridge_raw_score",
+        reconciled_col="ridge_moderate",
+        zone_col=zone_col,
+        population_col=pop_col,
+    )
 
     logger.info("Ridge model predictions complete.")
     return df, model

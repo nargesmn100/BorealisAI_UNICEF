@@ -59,7 +59,7 @@ dmypy.json
 # (keep CSVs and GPKG under version control if small enough)
 # -----------------------------------------------------------------------------
 
-# Rasters
+# Rasters and large geospatial binary formats
 *.tif
 *.tiff
 *.img
@@ -68,6 +68,16 @@ dmypy.json
 
 # Zip archives (raw downloads)
 *.zip
+
+# SPSS microdata files (licensed / confidential — do not commit)
+*.sav
+
+# Large generated output maps (Nigeria grid = 100K+ points, too large for GitHub)
+Data/outputs/nga/maps/*.html
+Data/outputs/nga/maps/*.geojson
+
+# Large derived feature files
+Data/Nigeria/features/nga_osm_buildings.parquet
 
 # Extracted raster temp files
 /tmp/

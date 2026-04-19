@@ -232,9 +232,84 @@ def build_target_table(cfg: dict, filtered: pd.DataFrame) -> pd.DataFrame:
     return targets
 
 
+def extract_quintile_targets(cfg: dict, jam_df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Extract wealth quintile disaggregated targets from MICS data.
+
+    Filters for Dimension="WEALTH_QUINTILE", Subgroup in Q1-Q5,
+    for each subregion (Urban, Rural, KMA) and national.
+
+    Parameters
+    ----------
+    cfg : dict
+    jam_df : pd.DataFrame
+        All Jamaica rows from ChPov_JAM_CUB.xlsx.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Quintile target table with columns: subregion, quintile, moderate_prevalence,
+        severe_prevalence. Returns None if quintile data not found.
+    """
+    if not cfg["targets"].get("use_quintile_targets", False):
+        logger.info("Quintile targets disabled in config. Skipping.")
+        return None
+
+    year = cfg["targets"]["survey_year"]
+    quintile_dim = cfg["targets"].get("quintile_dimension", "WEALTH_QUINTILE")
+    quintile_sgs = cfg["targets"].get("quintile_subgroups", ["Q1", "Q2", "Q3", "Q4", "Q5"])
+
+    # Filter: WEALTH_QUINTILE dimension, Q1-Q5 subgroups, correct year
+    mask = (
+        (jam_df[_COL_YEAR] == year)
+        & (jam_df[_COL_DIMENSION] == quintile_dim)
+        & (jam_df[_COL_SUBGROUP].isin(quintile_sgs))
+    )
+    filtered = jam_df[mask].copy()
+
+    if len(filtered) == 0:
+        logger.warning("No quintile target rows found for year=%d, dimension=%s.", year, quintile_dim)
+        return None
+
+    # Build clean table
+    rows = []
+    for _, row in filtered.iterrows():
+        rows.append({
+            "subregion": row[_COL_SUBREGION],
+            "quintile": row[_COL_SUBGROUP],
+            "moderate_prevalence": row[_COL_MOD_PREV],
+            "severe_prevalence": row[_COL_SEV_PREV],
+        })
+
+    qt = pd.DataFrame(rows)
+    logger.info("Extracted %d quintile target rows:", len(qt))
+    for _, row in qt.iterrows():
+        logger.info(
+            "  subregion=%-45s quintile=%s mod=%.1f%% sev=%.1f%%",
+            row["subregion"], row["quintile"],
+            row["moderate_prevalence"], row["severe_prevalence"],
+        )
+
+    # Save to interim
+    output_prefix = cfg.get("country", {}).get("output_prefix", "jam")
+    out_path = os.path.join(
+        os.path.dirname(cfg["paths"]["targets_file"]),
+        f"{output_prefix}_quintile_targets.csv",
+    )
+    qt.to_csv(out_path, index=False)
+    logger.info("Quintile targets saved to: %s", out_path)
+
+    return qt
+
+
 def run(cfg: dict) -> pd.DataFrame:
     """
     Entry point for Step 04.
+
+    Dispatches to the appropriate target extraction method based on
+    cfg["targets"]["target_source"]:
+      - "chpov_excel" (default, Jamaica) → parse ChPov_JAM_CUB.xlsx
+      - "mics_microdata" (Nigeria etc.) → compute from MICS SPSS microdata
 
     Parameters
     ----------
@@ -245,6 +320,16 @@ def run(cfg: dict) -> pd.DataFrame:
     pd.DataFrame
         Clean target table.
     """
+    target_source = cfg["targets"].get("target_source", "chpov_excel")
+
+    if target_source == "mics_microdata":
+        logger.info("Target source: MICS microdata (computing from SPSS files)...")
+        from src.targets.compute_mics_deprivation import run_nigeria_targets
+        targets = run_nigeria_targets(cfg)
+        return targets
+
+    # Default: Jamaica ChPov Excel extraction
+    logger.info("Target source: ChPov Excel...")
     jam_df = load_chpov_jamaica(cfg)
     filtered = extract_primary_targets(cfg, jam_df)
     targets = build_target_table(cfg, filtered)
@@ -253,6 +338,80 @@ def run(cfg: dict) -> pd.DataFrame:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     targets.to_csv(out_path, index=False)
     logger.info("Target table saved to: %s  (%d rows)", out_path, len(targets))
+
+    # Extract quintile targets if enabled
+    extract_quintile_targets(cfg, jam_df)
+
+    return targets
+
+
+def extract_sex_disaggregated_targets(cfg: dict, jam_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract sex-disaggregated poverty targets (Male/Female) by zone.
+
+    Filters ChPov_JAM_CUB.xlsx for Jamaica 2022, Dimension="SEX",
+    Subgroup="F"/"M".
+
+    Parameters
+    ----------
+    cfg : dict
+    jam_df : pd.DataFrame
+        All Jamaica rows from ChPov_JAM_CUB.xlsx.
+
+    Returns
+    -------
+    pd.DataFrame
+        Sex-disaggregated targets with columns: subregion, sex, severe_prevalence,
+        moderate_prevalence, severe_depth, moderate_depth.
+    """
+    year = cfg["targets"]["survey_year"]
+    dim_sex = cfg["targets"].get("dimension_sex", "SEX")
+    subgroup_f = cfg["targets"].get("subgroup_female", "F")
+    subgroup_m = cfg["targets"].get("subgroup_male", "M")
+
+    mask = (
+        (jam_df[_COL_YEAR] == year)
+        & (jam_df[_COL_DIMENSION] == dim_sex)
+        & (jam_df[_COL_SUBGROUP].isin([subgroup_f, subgroup_m]))
+    )
+    filtered = jam_df[mask].copy()
+
+    if len(filtered) == 0:
+        logger.warning(
+            "No sex-disaggregated rows found for year=%d, dimension=%s. "
+            "Available dimensions: %s",
+            year, dim_sex, sorted(jam_df[_COL_DIMENSION].unique()),
+        )
+        return pd.DataFrame()
+
+    targets = filtered[
+        [_COL_SUBREGION, _COL_SUBGROUP, _COL_SEV_PREV, _COL_MOD_PREV,
+         _COL_SEV_DEPTH, _COL_MOD_DEPTH]
+    ].copy()
+
+    targets = targets.rename(columns={
+        _COL_SUBREGION: "subregion",
+        _COL_SUBGROUP: "sex",
+        _COL_SEV_PREV: "severe_prevalence",
+        _COL_MOD_PREV: "moderate_prevalence",
+        _COL_SEV_DEPTH: "severe_depth",
+        _COL_MOD_DEPTH: "moderate_depth",
+    })
+
+    # Map subgroup codes to labels
+    targets["sex"] = targets["sex"].map({subgroup_f: "Female", subgroup_m: "Male"}).fillna(targets["sex"])
+
+    logger.info("Sex-disaggregated targets extracted: %d rows", len(targets))
+    for _, row in targets.iterrows():
+        logger.info(
+            "  subregion=%-40s  sex=%-6s  moderate=%.2f%%  severe=%.2f%%",
+            row["subregion"], row["sex"], row["moderate_prevalence"], row["severe_prevalence"],
+        )
+
+    sex_prefix = cfg.get("country", {}).get("output_prefix", "jam")
+    out_path = os.path.join(os.path.dirname(cfg["paths"]["targets_file"]), f"{sex_prefix}_targets_sex.csv")
+    targets.to_csv(out_path, index=False)
+    logger.info("Sex-disaggregated targets saved to: %s", out_path)
 
     return targets
 

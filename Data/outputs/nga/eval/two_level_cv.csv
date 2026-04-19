@@ -1,0 +1,41 @@
+held_out_state,held_out_setting,test_set,method,n_test,predicted_aggregate,target,abs_error
+Cross River,rural,held_out_state,ridge,1582,36.71,53.78,17.07
+Cross River,rural,within_training_rural,ridge,87395,49.31,47.47,1.84
+Cross River,urban,held_out_state,ridge,1582,36.95,53.78,16.83
+Cross River,urban,within_training_urban,ridge,13476,49.5,41.13,8.37
+Ekiti,rural,held_out_state,ridge,611,40.92,35.65,5.27
+Ekiti,rural,within_training_rural,ridge,88213,49.86,47.82,2.04
+Ekiti,urban,held_out_state,ridge,611,41.39,35.65,5.74
+Ekiti,urban,within_training_urban,ridge,13629,50.26,41.53,8.72
+Enugu,rural,held_out_state,ridge,1040,36.71,30.6,6.11
+Enugu,rural,within_training_rural,ridge,88094,49.86,47.76,2.09
+Enugu,urban,held_out_state,ridge,1040,39.64,30.6,9.04
+Enugu,urban,within_training_urban,ridge,13319,50.37,41.71,8.66
+Jigawa,rural,held_out_state,ridge,4018,50.98,73.06,22.08
+Jigawa,rural,within_training_rural,ridge,85246,47.38,46.53,0.86
+Jigawa,urban,held_out_state,ridge,4018,51.72,73.06,21.34
+Jigawa,urban,within_training_urban,ridge,13189,43.39,40.34,3.05
+Kaduna,rural,held_out_state,ridge,5907,53.15,25.76,27.39
+Kaduna,rural,within_training_rural,ridge,83383,51.85,48.9,2.96
+Kaduna,urban,held_out_state,ridge,5907,52.34,25.76,26.58
+Kaduna,urban,within_training_urban,ridge,13163,52.0,42.09,9.91
+Kogi,rural,held_out_state,ridge,2431,46.89,37.23,9.66
+Kogi,rural,within_training_rural,ridge,86526,50.01,47.98,2.03
+Kogi,urban,held_out_state,ridge,2431,46.07,37.23,8.84
+Kogi,urban,within_training_urban,ridge,13496,50.32,41.55,8.78
+Ogun,rural,held_out_state,ridge,2034,38.76,42.06,3.3
+Ogun,rural,within_training_rural,ridge,87009,49.69,47.73,1.96
+Ogun,urban,held_out_state,ridge,2034,41.42,42.06,0.64
+Ogun,urban,within_training_urban,ridge,13410,49.93,41.41,8.52
+Plateau,rural,held_out_state,ridge,3623,53.01,54.3,1.29
+Plateau,rural,within_training_rural,ridge,85481,49.61,47.47,2.14
+Plateau,urban,held_out_state,ridge,3623,52.01,54.3,2.29
+Plateau,urban,within_training_urban,ridge,13349,50.0,41.19,8.81
+Rivers,rural,held_out_state,ridge,1049,17.78,19.55,1.77
+Rivers,rural,within_training_rural,ridge,87962,51.15,48.82,2.33
+Rivers,urban,held_out_state,ridge,1049,14.75,19.55,4.8
+Rivers,urban,within_training_urban,ridge,13442,51.25,42.8,8.45
+Zamfara,rural,held_out_state,ridge,4350,57.67,64.26,6.59
+Zamfara,rural,within_training_rural,ridge,84652,49.11,46.76,2.35
+Zamfara,urban,held_out_state,ridge,4350,56.87,64.26,7.39
+Zamfara,urban,within_training_urban,ridge,13451,50.55,40.87,9.68

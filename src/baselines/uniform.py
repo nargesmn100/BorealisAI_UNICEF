@@ -112,9 +112,22 @@ def run(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
     moderate_col = "moderate_prevalence"
     severe_col = "severe_prevalence"
 
-    return apply_uniform_baseline(
+    df = apply_uniform_baseline(
         df,
         zone_col=zone_col,
         moderate_target_col=moderate_col,
         severe_target_col=severe_col,
     )
+
+    # Depth metrics — same uniform assignment
+    if "moderate_depth" in df.columns:
+        df = apply_uniform_baseline(
+            df,
+            zone_col=zone_col,
+            moderate_target_col="moderate_depth",
+            severe_target_col="severe_depth",
+            moderate_output_col="uniform_moderate_depth",
+            severe_output_col="uniform_severe_depth",
+        )
+
+    return df

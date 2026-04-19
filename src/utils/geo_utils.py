@@ -10,15 +10,12 @@ Includes helpers for:
 
 import logging
 import zipfile
-import io
 import tempfile
 import os
 from typing import Optional
 
 import numpy as np
 import rasterio
-from rasterio.windows import from_bounds
-from rasterio.warp import calculate_default_transform, reproject, Resampling
 from rasterio.crs import CRS
 import geopandas as gpd
 import pandas as pd
@@ -217,73 +214,6 @@ def sample_raster_at_points(
             src.close()
 
 
-def clip_raster_to_bbox(
-    src: rasterio.DatasetReader,
-    west: float,
-    south: float,
-    east: float,
-    north: float,
-) -> tuple:
-    """
-    Read a windowed portion of a raster corresponding to a bounding box.
-
-    Works in the raster's native CRS (no reprojection).  The bbox should
-    be supplied in the **raster's native CRS units**.
-
-    Parameters
-    ----------
-    src : rasterio.DatasetReader
-    west, south, east, north : float
-        Bounding box in raster's native CRS.
-
-    Returns
-    -------
-    (data, transform) : (np.ndarray shape (bands, rows, cols), Affine)
-    """
-    window = from_bounds(west, south, east, north, src.transform)
-    data = src.read(window=window)
-    transform = src.window_transform(window)
-    return data, transform
-
-
-def reproject_raster_to_wgs84(
-    src: rasterio.DatasetReader,
-    target_crs: str = "EPSG:4326",
-    resampling: Resampling = Resampling.nearest,
-) -> tuple:
-    """
-    Reproject a raster dataset to WGS84 (or another target CRS).
-
-    Returns in-memory reprojected data and the new transform / CRS.
-
-    Parameters
-    ----------
-    src : rasterio.DatasetReader
-    target_crs : str
-    resampling : rasterio.enums.Resampling
-
-    Returns
-    -------
-    (data, transform, crs) : (np.ndarray, Affine, CRS)
-    """
-    dst_crs = CRS.from_user_input(target_crs)
-    transform, width, height = calculate_default_transform(
-        src.crs, dst_crs, src.width, src.height, *src.bounds
-    )
-    data = np.empty((src.count, height, width), dtype=src.dtypes[0])
-    for band_idx in range(src.count):
-        reproject(
-            source=rasterio.band(src, band_idx + 1),
-            destination=data[band_idx],
-            src_transform=src.transform,
-            src_crs=src.crs,
-            dst_transform=transform,
-            dst_crs=dst_crs,
-            resampling=resampling,
-        )
-    return data, transform, dst_crs
-
-
 # ---------------------------------------------------------------------------
 # Spatial join helpers
 # ---------------------------------------------------------------------------
@@ -350,3 +280,83 @@ def spatial_join_points_to_polygons(
         )
 
     return joined.drop(columns=["index_right"], errors="ignore")
+
+
+def spatial_join_with_nearest_fallback(
+    points_gdf: gpd.GeoDataFrame,
+    polygons_gdf: gpd.GeoDataFrame,
+    polygon_cols: list,
+    how: str = "left",
+    max_distance: float = 0.05,
+) -> gpd.GeoDataFrame:
+    """
+    Spatial join points to polygons with nearest-neighbor fallback for unmatched.
+
+    First attempts ``sjoin(..., predicate="within")``. For any points that remain
+    unmatched (e.g. coastal cells outside polygon boundaries), falls back to
+    ``sjoin_nearest`` within ``max_distance``.
+
+    Parameters
+    ----------
+    points_gdf : GeoDataFrame
+    polygons_gdf : GeoDataFrame
+    polygon_cols : list of str
+    how : str
+    max_distance : float
+        Maximum distance (in CRS units, degrees for EPSG:4326) for nearest fallback.
+
+    Returns
+    -------
+    GeoDataFrame
+        Points enriched with polygon attributes and a ``parish_imputed`` column.
+    """
+    assert_crs_match(points_gdf, polygons_gdf, "points", "polygons")
+
+    poly_subset = polygons_gdf[["geometry"] + polygon_cols].copy()
+
+    # Step 1: standard within-join
+    joined = gpd.sjoin(points_gdf, poly_subset, how=how, predicate="within")
+    joined = joined.drop(columns=["index_right"], errors="ignore")
+
+    # Identify unmatched rows
+    unmatched_mask = joined[polygon_cols[0]].isna()
+    n_unmatched = unmatched_mask.sum()
+
+    joined["parish_imputed"] = False
+
+    if n_unmatched == 0:
+        logger.info("All points matched via within-join. No nearest fallback needed.")
+        return joined
+
+    logger.info(
+        "%d points unmatched after within-join. Attempting nearest-parish fallback "
+        "(max_distance=%.4f)...",
+        n_unmatched, max_distance,
+    )
+
+    # Step 2: nearest-join for unmatched points
+    unmatched_points = points_gdf.loc[joined.index[unmatched_mask]].copy()
+    nearest = gpd.sjoin_nearest(
+        unmatched_points,
+        poly_subset,
+        how="left",
+        max_distance=max_distance,
+    )
+    nearest = nearest.drop(columns=["index_right"], errors="ignore")
+
+    # Update the joined dataframe with nearest-match results
+    for col in polygon_cols:
+        joined.loc[unmatched_mask, col] = nearest[col].values
+
+    joined.loc[unmatched_mask, "parish_imputed"] = True
+
+    # Check how many are still unmatched after nearest fallback
+    still_unmatched = joined[polygon_cols[0]].isna().sum()
+    n_recovered = n_unmatched - still_unmatched
+    logger.info(
+        "Nearest-parish fallback recovered %d of %d unmatched points. "
+        "%d remain unmatched (beyond max_distance).",
+        n_recovered, n_unmatched, still_unmatched,
+    )
+
+    return joined

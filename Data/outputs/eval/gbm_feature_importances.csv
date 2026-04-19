@@ -1,0 +1,10 @@
+feature,importance
+rwi,493
+population,304
+travel_time_50k,266
+travel_time_cities,180
+smod_class,131
+log_population,61
+log_travel_time_cities,60
+log_travel_time_50k,60
+is_urban,18

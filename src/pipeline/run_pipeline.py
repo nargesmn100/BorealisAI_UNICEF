@@ -11,8 +11,8 @@ Usage
 Steps:
     01  Build base grid from RWI CSV
     02  Sample proxy rasters onto grid (population, SMOD, accessibility)
-    03  Assign GADM parishes + Urban/Rural/KMA subregions
-    04  Prepare Jamaica poverty targets
+    03  Assign GADM admin units + subregion labels
+    04  Prepare poverty targets (Excel or MICS microdata)
     05  Merge features and targets into modeling table
 """
 
@@ -53,9 +53,17 @@ def run_data_pipeline(
     pd.DataFrame
         Final modeling table.
     """
+    country_name = cfg.get("country", {}).get("name", "Jamaica")
     logger.info("=" * 60)
-    logger.info("Starting Jamaica Child Deprivation Data Pipeline")
+    logger.info("Starting %s Child Deprivation Data Pipeline", country_name)
     logger.info("=" * 60)
+
+    # Auto-download missing geospatial data (for Nigeria)
+    try:
+        from src.data.download_geospatial import ensure_geospatial_data
+        ensure_geospatial_data(cfg)
+    except Exception as e:
+        logger.debug("Geospatial data check skipped: %s", e)
 
     # ------------------------------------------------------------------
     # Step 01 — Base grid
@@ -108,6 +116,17 @@ def run_data_pipeline(
         targets = step04_prepare_targets.run(cfg)
 
     logger.info("[Step 04] Complete — %d target rows.", len(targets))
+
+    # ------------------------------------------------------------------
+    # Step 04b — Sex-disaggregated targets (analysis only, chpov_excel source)
+    # ------------------------------------------------------------------
+    target_source = cfg["targets"].get("target_source", "chpov_excel")
+    if target_source == "chpov_excel":
+        try:
+            jam_df = step04_prepare_targets.load_chpov_jamaica(cfg)
+            step04_prepare_targets.extract_sex_disaggregated_targets(cfg, jam_df)
+        except Exception as e:
+            logger.debug("Sex-disaggregated target extraction skipped: %s", e)
 
     # ------------------------------------------------------------------
     # Step 05 — Merge features + targets
