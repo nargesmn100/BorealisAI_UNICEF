@@ -318,6 +318,14 @@ def run(
 
     raw_preds = model.predict(X_pred)
 
+    clip_min = gam_cfg.get("clip_raw_min")
+    clip_max = gam_cfg.get("clip_raw_max")
+    if clip_min is not None or clip_max is not None:
+        lo = clip_min if clip_min is not None else -np.inf
+        hi = clip_max if clip_max is not None else np.inf
+        raw_preds = np.clip(raw_preds.astype(float), lo, hi)
+        logger.info("GAM raw scores clipped to [%.4f, %.4f] before reconciliation.", lo, hi)
+
     df = df.copy()
     df["gam_raw_score"] = np.nan
     df.loc[pred_mask, "gam_raw_score"] = raw_preds

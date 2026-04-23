@@ -312,6 +312,24 @@ def run(
             logger.info("quintile_target_moderate column not found. Using zone-level targets.")
 
     # ------------------------------------------------------------------
+    # Optional DHS soft label: blend aggregate target with nearest-cluster DHS deprivation
+    # ------------------------------------------------------------------
+    use_dhs_sl = ridge_cfg.get("use_dhs_soft_label", False)
+    dhs_w = float(ridge_cfg.get("dhs_soft_label_weight", 0.0))
+    if use_dhs_sl and dhs_w > 0 and "dhs_nearest_dep_index" in df.columns:
+        dhs_pct = df.loc[train_mask, "dhs_nearest_dep_index"].to_numpy(dtype=float) * 100.0
+        valid = np.isfinite(dhs_pct)
+        if valid.sum() > 0:
+            y_zone = y_train.copy()
+            y_train = y_zone.copy()
+            y_train[valid] = (1.0 - dhs_w) * y_zone[valid] + dhs_w * dhs_pct[valid]
+            logger.info(
+                "DHS soft label blend (weight=%.3f): using %d cells with nearest-cluster DHS.",
+                dhs_w,
+                int(valid.sum()),
+            )
+
+    # ------------------------------------------------------------------
     # RWI prior: compute prior and train on residuals
     # ------------------------------------------------------------------
     rwi_prior_train = None

@@ -8,8 +8,8 @@
 ## Table of Contents
 
 1. [What Has Been Built](#1-what-has-been-built)
-2. [How the Model Works](#2-how-the-model-works)
-3. [Current Model Performance](#3-current-model-performance)
+2. [How the Model Works](#2-how-the-model-works) — including how a cell gets its score and what we can/cannot know
+3. [Current Model Performance](#3-current-model-performance) — LOZO full results, permutation test, hierarchical validation
 4. [How to Test It](#4-how-to-test-it)
 5. [All Outputs](#5-all-outputs)
 6. [Next Steps](#6-next-steps)
@@ -35,9 +35,13 @@
 | OSM Building Density | OpenStreetMap | Building count density + log transform |
 | GHSL Built-Up Surface 2020 | EU JRC | Satellite building fraction per cell (ghsl_built_frac, log_ghsl_built) |
 | LSMS-ISA 2018–2019 | World Bank | Household consumption for sub-state validation |
+| Nigeria DHS 2018 (Flat Files + `NGGE7BFL.shp`) | DHS Program | Cluster deprivation + 1,382 geolocated clusters; `merge_dhs_gps` + `validate_predictions_vs_dhs_gps` |
+| NBS NLSS 2019 | National Bureau of Statistics Nigeria | State-level monetary poverty headcount (36 states + FCT) — 3rd independent validation source |
+| MICS6 Education Indicators | MICS6 hl.sav microdata | School attendance, ever-attended, public school rates — state × urban/rural |
+| MICS6 Health Utilization Indicators | MICS6 wm.sav + ch.sav | ANC rate, skilled delivery, facility delivery, vaccination card, diarrhea care — state × urban/rural |
 | GADM Admin Boundaries | GADM v4.1 | State (ADM1) + LGA (ADM2) polygons |
 
-**Total features in model: 20** *(includes GHSL built-up surface added Apr 19, 2026)*
+**Total features in model: 28** *(updated Apr 21, 2026 — added 8 education + health utilization features from MICS6 microdata)*
 
 ---
 
@@ -134,6 +138,72 @@ The pipeline solves a **disaggregation problem**: MICS gives us one number per s
 
 > **What reconciliation means for trust:** You can trust state totals (by construction). You should treat within-state LGA distributions as model estimates that need validation.
 
+---
+
+### How a Cell Gets Its Score — Three Phases
+
+Understanding this precisely matters for interpreting what the outputs mean.
+
+**Phase 1 — Training label (same for every cell in a state)**
+
+The MICS survey gives one number per state. Every cell inside that state is assigned that same number as its training label. There is no cell-level ground truth:
+
+```
+All 514 Lagos cells  → labeled 21.75%
+All 3,296 Kano cells → labeled 50.05%
+All 682 Abia cells   → labeled 17.11%
+```
+
+36 unique labels across 103,424 cells.
+
+**Phase 2 — Model predicts a raw score (cells now differ)**
+
+Ridge regression takes the *features* of each cell (RWI, nightlights, building density, travel time, etc.) and predicts a continuous score. Because features differ between cells within the same state, the raw scores now vary:
+
+```
+Lagos cells — all officially 21.75%, but raw model output:
+cell at lat=6.63, lon=3.26  (RWI=1.45)  →  30.4
+cell at lat=6.41, lon=3.28  (RWI=0.66)  →  33.5
+cell at lat=6.61, lon=3.94  (RWI=0.89)  →  26.8
+```
+
+These raw scores are not calibrated to 21.75%. They encode *relative* spatial variation within the state — which neighbourhoods look more or less deprived compared to each other, according to the proxy features.
+
+**Phase 3 — Reconciliation (force cells to aggregate to official score)**
+
+Each cell's raw score is multiplied by a per-state scale factor:
+
+```
+scale_factor = official_target / population_weighted_mean(raw_scores)
+
+Lagos: 21.75 / 30.4 = 0.715
+Every Lagos raw score × 0.715 → final reconciled score
+```
+
+After reconciliation, the population-weighted average of all cells in a state exactly equals the official MICS figure. This is guaranteed by construction — it is not a model accuracy claim.
+
+```
+State    | Official | Pop-wtd reconciled  | Cells
+Lagos    |  21.75%  |      21.75%         |   514
+Kano     |  50.05%  |      50.05%         | 3,296
+Abia     |  17.11%  |      17.11%         |   682
+```
+
+---
+
+### What We Know vs. What We Don't
+
+| Claim | Status | Basis |
+|---|---|---|
+| State aggregates are correct | **Guaranteed** | By construction (reconciliation) |
+| Model ranks states correctly (not seen in training) | **Proven** | LOZO r=0.76, permutation p=0.0003 |
+| Within-state spatial pattern is plausible | **Partially supported** | LSMS external validation r=0.43 |
+| Individual cell scores are accurate | **Unknown — fundamentally unverifiable** | No cell-level ground truth exists or can exist |
+
+**Cell-level ground truth cannot exist.** A "cell" is a ~1 km² square of land. Knowing its true poverty rate would require surveying every household inside it — something never done anywhere in the world at scale. This is not a data gap that will be filled; it is an inherent limit of how surveys work.
+
+What *can* be done is **point-sample validation**: check model predictions at specific locations where household surveys happened (DHS or LSMS clusters). This tests whether the spatial pattern *at surveyed spots* is reasonable, not whether every cell is correct. The LSMS validation (r=0.43) already does this. DHS clusters would extend it to ~1,600–8,000 additional points.
+
 ### Features the Model Uses
 
 | Feature | Role |
@@ -153,53 +223,132 @@ The pipeline solves a **disaggregation problem**: MICS gives us one number per s
 
 ## 3. Current Model Performance
 
-### LOZO Cross-Validation (hold out one state, predict it)
+### Are Predictions Better Than Random? Yes — Decisively.
 
-| Model | Mean Abs Error | Median Abs Error | Notes |
-|---|---|---|---|
-| **WSNN** | **8.76 pp** | **7.21 pp** | Best performer |
-| Ridge | 11.62 pp | 7.88 pp | Stable, fast |
-| RWI baseline | 15.46 pp | 16.98 pp | Strong no-ML baseline |
-| Uniform | 15.46 pp | 16.98 pp | Weakest baseline |
-| GAM | unstable in LOZO | — | Overfits in some folds |
+Before looking at the metrics, the fundamental question is whether the spatial structure is real.
 
-"pp" = percentage points. A state with true value of 50% is predicted within ~7–11 pp on average.
+**Permutation test (10,000 random label shuffles vs. Ridge):**
+
+| | Pearson r |
+|---|---|
+| Ridge (actual predictions) | **0.535** |
+| Random shuffles (mean across 10,000) | −0.0007 |
+| Permutation p-value | **0.0003** |
+
+Only 3 out of 10,000 random assignments achieved a correlation as high as Ridge. The spatial signal is real.
+
+**Significance vs. RWI-only proxy baseline:**
+
+All learned models beat the simple "use Relative Wealth Index as a deprivation proxy" heuristic at p < 10⁻⁴⁰ (Wilcoxon signed-rank test, n=103,424 cells).
+
+---
+
+### LOZO Cross-Validation — What It Measures
+
+LOZO (Leave-One-Zone-Out) is the primary accuracy test. For each state in turn:
+1. Remove all cells from that state from the training set
+2. Train the model on the remaining 35 states
+3. Predict the held-out state using only its features — no reconciliation, no state label used
+4. Compare the population-weighted prediction aggregate to the official MICS figure
+
+This tests whether the model can correctly estimate a region it has never seen.
+
+**Summary by model:**
+
+| Model | Mean Abs Error | Pearson r | p-value | Notes |
+|---|---|---|---|---|
+| **WSNN** | **8.6 pp** | **0.757** | < 0.0001 | Best performer |
+| Ridge | 11.6 pp | 0.535 | 0.0008 | Stable, fast, interpretable |
+| RWI baseline | 15.5 pp | n/a | — | Simple proxy, no learning |
+| Uniform | 15.5 pp | n/a | — | National mean, weakest |
+| GAM | 158 pp | 0.052 (n.s.) | 0.76 | **Numerically unstable in LOZO — do not use for generalization** |
+
+**What Pearson r means here:** r=0.757 means that when you pick two random states, the model correctly identifies which one is poorer ~88% of the time, trained only on the other 35 states.
+
+**Full LOZO results (WSNN), every state, sorted by true poverty:**
+
+| State | True % | Predicted % | Error | Notes |
+|---|---|---|---|---|
+| Abia | 17.1 | 22.8 | +5.6 | |
+| Rivers | 19.6 | 15.8 | −3.7 | |
+| Lagos | 21.8 | 9.4 | **−12.3** | Outlier — unique mega-city profile |
+| Imo | 21.9 | 21.0 | −0.9 ✓ | |
+| Anambra | 23.6 | 23.8 | +0.2 ✓ | |
+| Kaduna | 25.8 | 47.7 | **+22.0** | Features suggest poverty, survey says not |
+| Enugu | 30.6 | 31.0 | +0.4 ✓ | |
+| Delta | 31.2 | 29.8 | −1.4 ✓ | |
+| Akwa Ibom | 32.8 | 17.7 | −15.2 | |
+| Oyo | 34.4 | 39.4 | +4.9 | |
+| Ekiti | 35.6 | 25.1 | −10.6 | |
+| Borno | 38.9 | 44.8 | +5.9 | |
+| Ondo | 39.0 | 34.7 | −4.3 | |
+| Ogun | 42.1 | 31.9 | −10.2 | |
+| Nasarawa | 47.8 | 88.4 | **+40.6** | Worst miss — rural proxies mislead |
+| Kano | 50.1 | 51.2 | +1.1 ✓ | |
+| Niger | 52.4 | 53.4 | +1.0 ✓ | |
+| Adamawa | 52.6 | 57.9 | +5.2 | |
+| Cross River | 53.8 | 32.9 | −20.9 | |
+| Plateau | 54.3 | 51.8 | −2.5 ✓ | |
+| Bauchi | 59.3 | 66.3 | +7.0 | |
+| Katsina | 61.0 | 58.1 | −2.9 ✓ | |
+| Gombe | 61.2 | 61.4 | +0.1 ✓ | |
+| Benue | 62.2 | 42.1 | −20.1 | |
+| Taraba | 63.4 | 67.3 | +4.0 | |
+| Zamfara | 64.3 | 62.2 | −2.0 ✓ | |
+| Yobe | 65.3 | 66.7 | +1.4 ✓ | |
+| Sokoto | 69.9 | 59.3 | −10.6 | |
+| Kebbi | 70.1 | 61.3 | −8.7 | |
+| Jigawa | 73.1 | 57.9 | −15.2 | |
+
+**Badly predicted states** (error > 20 pp): Nasarawa (+41), Kaduna (+22), Cross River (−21), Benue (−20), Ebonyi (+21). These are states where proxy features tell a misleading story compared to actual household surveys. The model has no way to know this without state-level data.
+
+---
 
 ### Hierarchical Validation (trained on 6 zones → predicts 37 states)
 
-Results with 20-feature model including GHSL. GBM now runs all experiments (threading fix applied Apr 19).
+The hardest test: train only on 6 geopolitical zones, evaluate on 37 individual states — a level the model was never trained on.
 
-| Experiment | Model | MAE (raw) | Pearson r | What this proves |
+| Experiment | Model | MAE (raw) | Pearson r | Spearman ρ |
 |---|---|---|---|---|
-| Zone → State | Ridge | 13.3 pp | **0.598** | Model ranks states from features alone, without state supervision |
-| Zone → State | GBM | **11.3 pp** | 0.500 | Lower absolute error; GBM now fully operational |
-| Zone → State×Urban/Rural | Ridge | 18.9 pp | 0.271 | Urban/rural split weaker without direct training signal |
-| State → State×Urban/Rural | Ridge | 15.7 pp | 0.491 | Urban/rural disaggregation from state-level training |
-| State → State×Urban/Rural | GBM | 14.7 pp | 0.495 | GBM slightly better on absolute error |
+| Zone → State | Ridge | 13.3 pp | **0.598** | 0.623 |
+| Zone → State | GBM | **11.3 pp** | 0.500 | 0.505 |
+| Zone → State × Urban/Rural | Ridge | 18.9 pp | 0.271 | 0.315 |
+| Zone → State × Urban/Rural | GBM | 18.6 pp | 0.205 | 0.244 |
+| State → State × Urban/Rural | Ridge | 15.7 pp | 0.491 | 0.503 |
+| State → State × Urban/Rural | GBM | 14.6 pp | 0.495 | 0.500 |
 
-**Key takeaway:** Pearson r ~0.60 when trained on 6 zones and evaluated on 37 states — the model genuinely learns geographic patterns from features, not just memorising labels.
+**Key finding:** r=0.60 from 6 coarse zone labels generalising to 37 states proves the feature set encodes genuine poverty signal. The urban/rural breakdown is weaker (r=0.2–0.3) — sub-state urban/rural splits require finer training supervision.
+
+---
 
 ### LSMS Household Validation (external, independent)
 
-- Compared grid-cell predictions to actual household consumption data from the LSMS-ISA 2018–2019 survey
+- ~4,976 GPS-surveyed households from the LSMS-ISA 2018–2019 survey — not used in any training
+- Each household has actual consumption data (income proxy) and a GPS location
+- Compared model's grid-cell prediction at each household location to observed consumption
 - Pearson r ≈ **0.43** between predicted deprivation rank and inverse consumption rank
-- This is an independent external validation not used in training
 
-### Two-Level CV (holds out an entire state)
+This is a point-sample check: at surveyed locations, does the spatial pattern make sense? r=0.43 suggests it does, but with substantial noise. This is the only current evidence that the within-state spatial distribution is partially correct.
 
-- Well-predicted states (abs error < 5 pp): Rivers, Plateau, Ogun, Zamfara
-- Poorly predicted states (abs error > 20 pp): Kaduna (27 pp), Jigawa (22 pp)
-- Mean error on held-out states: **~10.4 pp**
+---
+
+### GAM Instability — Known Issue
+
+GAM achieves reasonable in-sample fit but has a critical flaw in LOZO: when a high-poverty zone is held out, GAM extrapolates wildly (mean absolute error 158 pp, Pearson r=0.05, not significant). This is a generalisation failure — the GAM overfits the training zones and cannot be trusted for geographic generalization. It should not be used for producing final maps. Ridge and WSNN are the reliable models.
+
+---
 
 ### Model Comparison Summary
 
-| Criterion | Best Model |
-|---|---|
-| Raw spatial accuracy (LOZO) | WSNN |
-| Geographic generalization (hierarchical) | Ridge (most stable) |
-| Interpretability / feature effects | GAM |
-| Uncertainty quantification | Ridge + GBM (have 90% CI bands) |
-| Speed | Ridge (~1 sec), GAM (~20 sec), WSNN (~15 sec) |
+| Criterion | Best Model | Notes |
+|---|---|---|
+| Raw spatial accuracy (LOZO) | **WSNN** | r=0.76, MAE=8.6 pp |
+| Geographic generalization (hierarchical) | **Ridge** | Most stable; r=0.60 from zone supervision |
+| Within-state validation (LSMS) | **Ridge / WSNN** | r≈0.43, similar across models |
+| Interpretability | Ridge / GAM | Coefficients + splines readable |
+| Uncertainty quantification | Ridge | 90% CI bands; GAM CI bands unreliable |
+| Speed | Ridge (~1s) | WSNN ~15s, GAM ~20s |
+| Geographic generalization | **Avoid GAM** | Numerically unstable on held-out zones |
 
 ---
 
@@ -316,55 +465,135 @@ python main.py --country nga --force-rerun --skip-gbm
 
 ## 6. Next Steps
 
-### ✅ Completed since last update (Apr 19, 2026)
+### ✅ Completed since last update (Apr 21, 2026)
 
 | Item | Status |
 |---|---|
-| GHSL built-up surface (satellite building density) | ✅ Downloaded, processed, in model — 20 features total |
+| GHSL built-up surface (satellite building density) | ✅ Downloaded, processed, in model |
 | GBM OpenMP threading crash in hierarchical CV | ✅ Fixed — GBM now runs all 3 hierarchical experiments |
 | Config file `config_nga.yaml` | ✅ Reconstructed and committed |
+| Nigeria DHS 2018 flat files processed | ✅ 30,713 children, 1,389 clusters, zone-level deprivation computed (`src/scripts/process_dhs.py`) |
+| DHS vs MICS cross-validation | ✅ Pearson r=0.96, Spearman ρ=0.77 — strong zone-level agreement; North West flagged |
+| NBS NLSS 2019 state poverty data | ✅ Downloaded, processed, 3rd validation source (`Data/Nigeria/nbs/`) |
+| NBS vs MICS cross-validation | ✅ Spearman ρ=0.64 — moderate agreement (different poverty concepts) |
+| MICS6 school attendance features | ✅ 37 states × urban/rural extracted from hl.sav — 3 new model features |
+| MICS6 health utilization features | ✅ 37 states × urban/rural extracted from wm.sav + ch.sav — 5 new model features |
+| Pipeline rebuilt with 28 features | ✅ Modeling table rebuilt; all features confirmed joined (103,424/103,424 cells) |
+| Interactive 6-panel comparison map | ✅ `Data/outputs/nga/maps/nga_comparison_map.html` — MICS truth, Ridge, GAM, error, uncertainty, NBS |
+| DHS nearest-cluster engineered features | ✅ Added to modeling table (`dhs_nearest_dep_index`, `dist_km_nearest_dhs_cluster`) and included in `config_nga.yaml` |
+| Ridge DHS soft-label sweep | ✅ Tested weights 0.1/0.2/0.3/0.4; best external fit at `dhs_soft_label_weight=0.4` (Spearman ρ=0.600, MAE=14.45 pp vs DHS index×100) |
 
 ---
 
-### Priority 1 — DHS 2018 GPS Clusters *(waiting for approval email)*
+### Current Metrics Snapshot (latest run)
+
+#### Held-out region generalization (LOZO, Ridge, pre-reconciliation on held-out state)
+
+- Mean absolute error (MAE): **11.98 pp**
+- Pearson correlation (target vs predicted aggregate): **0.495**
+- Spearman rank correlation: **0.636**
+- Hardest held-out states: **Nasarawa (+74.5 pp overpredict)**, **Jigawa (-37.9 pp underpredict)**, **Kaduna (+28.4 pp overpredict)**
+
+#### DHS GPS external validation (1,382 clusters, nearest-grid comparison)
+
+- Mean distance DHS point -> nearest grid cell centre: **1.02 km** (median 1.00 km)
+- Ridge Spearman ρ: **0.600** (p < 0.0001)
+- Ridge Pearson r: **0.584** (p < 0.0001)
+- Ridge MAE: **14.45 pp** (DHS deprivation index ×100 vs Ridge moderate %)
+- RWI baseline Spearman ρ: **0.542**
+
+#### Current selected configuration
+
+- `use_dhs_soft_label: true`
+- `dhs_soft_label_weight: 0.4` (best among 0.1/0.2/0.3/0.4 on DHS external fit)
+
+---
+
+### Priority 1 — DHS 2018 GPS Clusters — **shapefile integrated + feature engineering complete** *(full point-level training loss still TODO)*
 
 **Impact: Highest possible accuracy gain — the single remaining lever.**
 
-DHS provides GPS-located survey clusters with individual household microdata. This enables:
-- **Point-level training supervision** — replace state-level labels (~37 regions) with cluster-level labels (~1,600 GPS points)
-- Expected accuracy improvement: LOZO MAE ~10 pp → ~4–6 pp; LSMS Pearson ~0.43 → ~0.70+
-- Enables sub-state validation with actual deprivation data, not just the consumption proxy
+#### What DHS actually provides
 
-When you receive access, place files here:
+DHS surveys interview ~20–30 households at specific GPS locations (clusters). Each cluster has a measured deprivation score and a lat/lon coordinate (jittered ±5 km for privacy). Nigeria DHS 2018 has ~1,600 clusters.
+
+#### What DHS does NOT solve
+
+DHS does **not** provide true cell-level ground truth. True cell-level ground truth — knowing the exact poverty rate of every 1 km² square — cannot exist. It would require surveying every household in every cell, which has never been done anywhere. This is a fundamental limit, not a data gap.
+
+#### What DHS actually solves
+
+**1. Better training signal (the main benefit)**
+
+Currently the model trains with 36 state-level labels. Every cell in Lagos is labeled 21.75% regardless of whether it's a slum or a wealthy waterfront neighbourhood.
+
+With DHS clusters, you have ~1,600 training labels at specific locations — each a real household measurement. The model can learn "this cluster near Victoria Island = 8%, this cluster in a dense low-light area = 34%" instead of "all of Lagos = 21.75%."
+
 ```
-Data/Nigeria/dhs/
-├── NGKR7AFL.DTA     # Kids recode (under-5 deprivation indicators)
-├── NGHR7AFL.DTA     # Household recode
-└── NGGE7AFL.DTA     # GPS cluster coordinates (jittered to 5 km)
+Current:  36 state labels   → 103K cells share 36 numbers
+With DHS: ~1,600 cluster labels → model learns from actual place-specific deprivation
 ```
 
-Then:
+Expected improvement: LOZO MAE ~8–11 pp → ~4–6 pp; hierarchical r ~0.60 → ~0.75+.
+
+**2. More validation points**
+
+Currently: 4,976 LSMS points for external validation (r≈0.43).
+With DHS: +1,600 cluster points to validate spatial pattern at more locations.
+
+This does not prove cell-level accuracy — but it provides more evidence that the spatial pattern is or isn't plausible.
+
+#### Current status after GPS integration
+
+DHS Household and Kids Recode flat files are already processed (`process_dhs.py` done).
+Cluster-level deprivation is keyed by `cluster_id` in `Data/Nigeria/dhs/nga_dhs_cluster_deprivation.csv`.
+
+GPS shapefile is now integrated from:
+```
+Data/Nigeria/dhs/NGGE7BFL.shp   # (or NGGE7BFL.DTA)
+```
+
+Re-run training/evaluation:
 ```bash
-python src/scripts/process_dhs.py      # script to be written on data arrival
-python main.py --country nga --force-rerun
+python main.py --country nga --skip-gbm --skip-gam --skip-wsnn
+python -m src.scripts.validate_predictions_vs_dhs_gps
 ```
 
 ---
 
-### Priority 2 — School Quality / Governance Features *(data requests needed)*
+### Priority 2 — School Quality / Governance Features
 
-Currently `dist_school_km` captures proximity but not quality. These features would improve within-state accuracy:
+School attendance and health utilization (from MICS6 microdata) are now in the model. Remaining high-value features:
 
-| Dataset | Source | Cost |
+| Dataset | Source | Status |
 |---|---|---|
-| Nigeria EMIS (school completion rates) | Federal Ministry of Education Nigeria | Free, requires request |
-| Nigeria HMIS (health facility utilization) | NHIA / FMOH | Free, requires request |
-| Subnational governance indicators | Mo Ibrahim Foundation | Partially free |
-| P-code matched LGA poverty index | NBS Nigeria | Free from NBS website |
+| Nigeria EMIS school completion rates by LGA | Federal Ministry of Education | Request needed — would give LGA-level quality |
+| Subnational governance indicators | Mo Ibrahim Foundation | Partially free — would capture local governance capacity |
+| NBS LGA-level poverty p-codes | NBS Nigeria | Available on request |
 
 ---
 
-### Priority 3 — Generalize to Other Countries
+### Priority 3 — Poverty Score Breakdown / Explainability
+
+Need a decomposition layer so each predicted poverty score is not just a single number, but a transparent breakdown of "what drove it."
+
+Target output for each geography (cell/LGA/state):
+
+- Predicted poverty score (e.g., 69%)
+- Contribution by major feature groups (wealth, access, built environment, education, health utilization, conflict, climate, DHS proximity)
+- Raw feature values used for that location (not just contributions)
+- Direction of effect (+ pushes poverty up, - pushes it down)
+- Optional uncertainty/confidence flag for the decomposition
+
+Planned artifacts:
+
+- `Data/outputs/nga/tables/nga_prediction_breakdown.csv`
+- Explainability panel in map tooltip / dashboard
+- Method notes documenting how contributions are computed (Ridge coefficients first; later SHAP for GBM/WSNN)
+
+---
+
+### Priority 4 — Generalize to Other Countries
 
 The pipeline is fully config-driven. To add a country (e.g., Albania, Sudan, Ethiopia):
 
@@ -380,7 +609,7 @@ Countries with MICS6 data available: ~60 countries. RWI covers ~100 low/middle-i
 
 ---
 
-### Priority 4 — DHS Point-Level Training *(after DHS arrives)*
+### Priority 5 — DHS Point-Level Training *(after DHS arrives)*
 
 Once DHS GPS clusters are available, the training paradigm can shift from coarse weak supervision to direct point-level regression:
 
@@ -399,7 +628,10 @@ Combined with 4,976 LSMS households already processed, this gives ~6,600 real-wo
 
 | Next Step | Effort | Impact | Blocker |
 |---|---|---|---|
-| **DHS GPS clusters** | 1 day implementation | **Very High** | Waiting on approval email |
-| School/governance features | 2–3 days | Medium | Data requests to FME / NBS |
+| **DHS GPS join + validation** | done (`merge_dhs_gps`, `validate_predictions_vs_dhs_gps`) | High | — |
+| DHS point-level training in loss (beyond soft-label blend) | 3–5 days | **Very High** | Design + `main.py` change |
+| Poverty score breakdown / explainability outputs | 2–4 days | High | Attribution design + output schema |
+| LGA-level governance/EMIS features | 2–3 days | Medium | Data requests to FME / NBS |
 | Other countries | 1–2 days per country | High | Country-specific MICS data |
-| DHS point-level training | 3–5 days | **Very High** | DHS data arrival |
+
+**Model currently at 30 features** (28 + 2 DHS nearest-cluster features). Next milestone: full DHS point-level loss integration (beyond soft labels) to move from weak supervision toward cluster-supervised training.

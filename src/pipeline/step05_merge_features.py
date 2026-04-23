@@ -56,6 +56,50 @@ from src.utils.config_loader import load_config, setup_logging, get_available_fe
 logger = logging.getLogger(__name__)
 
 
+def _assign_dhs_nearest_dep_features(merged: pd.DataFrame, project_root: str) -> pd.DataFrame:
+    """
+    For each grid cell, attach DHS cluster deprivation (nearest cluster by lon/lat)
+    and great-circle distance in km. Requires merge_dhs_gps output CSV.
+    """
+    csv_path = os.path.join(project_root, "Data/Nigeria/dhs/nga_dhs_cluster_deprivation_geo.csv")
+    if not os.path.isfile(csv_path):
+        return merged
+    try:
+        from scipy.spatial import cKDTree
+        dhs = pd.read_csv(csv_path)
+        required = ("LONGNUM", "LATNUM", "deprivation_index")
+        if not all(c in dhs.columns for c in required):
+            return merged
+        cl = np.column_stack([dhs["LONGNUM"].values, dhs["LATNUM"].values])
+        tree = cKDTree(cl)
+        lon = merged["longitude"].to_numpy(dtype=float)
+        lat = merged["latitude"].to_numpy(dtype=float)
+        pts = np.column_stack([lon, lat])
+        _, idx = tree.query(pts, k=1)
+        dhs_dep = dhs["deprivation_index"].to_numpy()
+        cl_lon = dhs["LONGNUM"].to_numpy()[idx]
+        cl_lat = dhs["LATNUM"].to_numpy()[idx]
+        merged = merged.copy()
+        merged["dhs_nearest_dep_index"] = dhs_dep[idx]
+        # Haversine distance (km) cell → assigned cluster
+        r_km = 6371.0
+        lon1, lat1, lon2, lat2 = map(np.radians, (lon, lat, cl_lon, cl_lat))
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = (
+            np.sin(dlat / 2.0) ** 2
+            + np.cos(lat1) * np.cos(lat2) * (np.sin(dlon / 2.0) ** 2)
+        )
+        merged["dist_km_nearest_dhs_cluster"] = 2.0 * r_km * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+        logger.info(
+            "DHS nearest-cluster features attached (%d cells).",
+            int(merged["dhs_nearest_dep_index"].notna().sum()),
+        )
+    except Exception as e:
+        logger.warning("Could not assign DHS nearest-cluster features: %s", e)
+    return merged
+
+
 def _assign_quintile_memberships(
     df: pd.DataFrame,
     quintile_targets: pd.DataFrame,
@@ -314,18 +358,6 @@ def merge_features_and_targets(
             )
 
     # ------------------------------------------------------------------
-    # Feature completeness check
-    # ------------------------------------------------------------------
-    feature_cols = get_available_features(cfg, merged)
-    for col in feature_cols:
-        n_missing = merged.loc[merged["in_modeling_sample"], col].isna().sum()
-        if n_missing > 0:
-            logger.warning(
-                "Feature '%s': %d missing values in modeling sample after imputation.",
-                col, n_missing,
-            )
-
-    # ------------------------------------------------------------------
     # Summary statistics of targets
     # ------------------------------------------------------------------
     logger.info("Target value summary by subregion:")
@@ -360,9 +392,66 @@ def merge_features_and_targets(
             logger.warning("Could not join new enrichment features: %s", e)
 
     # ------------------------------------------------------------------
-    # Hierarchy columns (Nigeria only) — needed for hierarchical validation
+    # Education + Health utilization features (Nigeria only)
+    # Extracted from MICS6 2021 microdata — state × urban/rural level
     # ------------------------------------------------------------------
     country_code = cfg.get("country", {}).get("code", "")
+    if country_code == "NGA":
+        try:
+            edu_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "Data/Nigeria/features/education/nga_mics_education_by_state_urbanrural.csv",
+            )
+            if os.path.isfile(edu_path):
+                edu = pd.read_csv(edu_path)
+                edu["is_urban_flag"] = (edu["urban_rural"] == "urban").astype(int)
+                edu = edu.rename(columns={"state": "subregion"})[
+                    ["subregion", "is_urban_flag",
+                     "school_attendance_rate", "ever_attended_rate", "public_school_rate"]
+                ]
+                merged["is_urban_flag"] = merged["is_urban"].astype(int)
+                pre_len = len(merged)
+                merged = merged.merge(edu, on=["subregion", "is_urban_flag"], how="left")
+                logger.info(
+                    "Education features joined: %d/%d cells matched.",
+                    merged["school_attendance_rate"].notna().sum(), pre_len,
+                )
+                merged = merged.drop(columns=["is_urban_flag"], errors="ignore")
+        except Exception as e:
+            logger.warning("Could not join education features: %s", e)
+
+    # Health utilization features
+    if country_code == "NGA":
+        try:
+            health_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "Data/Nigeria/features/health/nga_mics_health_by_state_urbanrural.csv",
+            )
+            if os.path.isfile(health_path):
+                health = pd.read_csv(health_path)
+                health["is_urban_flag"] = (health["urban_rural"] == "urban").astype(int)
+                health_cols = ["anc_rate", "skilled_delivery_rate",
+                               "facility_delivery_rate", "vacc_card_rate", "diarrhea_care_rate"]
+                existing_health_cols = [c for c in health_cols if c in health.columns]
+                health = health.rename(columns={"state": "subregion"})[
+                    ["subregion", "is_urban_flag"] + existing_health_cols
+                ]
+                if "is_urban_flag" not in merged.columns:
+                    merged["is_urban_flag"] = merged["is_urban"].astype(int)
+                pre_len = len(merged)
+                merged = merged.merge(health, on=["subregion", "is_urban_flag"], how="left")
+                logger.info(
+                    "Health utilization features joined: %d/%d cells matched.",
+                    merged["anc_rate"].notna().sum() if "anc_rate" in merged.columns else 0,
+                    pre_len,
+                )
+                merged = merged.drop(columns=["is_urban_flag"], errors="ignore")
+        except Exception as e:
+            logger.warning("Could not join health utilization features: %s", e)
+
+    # ------------------------------------------------------------------
+    # Hierarchy columns (Nigeria only) — needed for hierarchical validation
+    # ------------------------------------------------------------------
     if country_code == "NGA":
         try:
             from src.utils.admin_mappings import add_geopolitical_zones, add_state_urban_rural
@@ -371,6 +460,21 @@ def merge_features_and_targets(
             logger.info("Nigeria hierarchy columns added: geopolitical_zone, state_urban_rural.")
         except Exception as e:
             logger.warning("Could not add Nigeria hierarchy columns: %s", e)
+
+        pr = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        merged = _assign_dhs_nearest_dep_features(merged, pr)
+
+    # ------------------------------------------------------------------
+    # Feature completeness (after all feature joins)
+    # ------------------------------------------------------------------
+    feature_cols = get_available_features(cfg, merged)
+    for col in feature_cols:
+        n_missing = merged.loc[merged["in_modeling_sample"], col].isna().sum()
+        if n_missing > 0:
+            logger.warning(
+                "Feature '%s': %d missing values in modeling sample after imputation.",
+                col, n_missing,
+            )
 
     # ------------------------------------------------------------------
     # Quintile-based pseudo-targets (if available)
