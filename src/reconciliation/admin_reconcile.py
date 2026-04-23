@@ -105,7 +105,10 @@ def reconcile_predictions(
         output_col = f"{raw_score_col}_reconciled"
 
     result = df.copy()
-    result[output_col] = np.nan
+    
+    # Only initialize output column if it's different from raw_score_col
+    if output_col != raw_score_col:
+        result[output_col] = np.nan
 
     # Work only on rows with valid raw scores and targets
     valid_mask = (
@@ -200,6 +203,92 @@ def reconcile_predictions(
             n_cells,
         )
 
+    return result
+
+
+def reconcile_uncertainty_bounds(
+    df: pd.DataFrame,
+    lower_col: str,
+    upper_col: str,
+    raw_col: str,
+    reconciled_col: str,
+    zone_col: str = "subregion",
+    population_col: str = "population",
+    clamp_min: float = 0.0,
+    clamp_max: float = 100.0,
+) -> pd.DataFrame:
+    """
+    Propagate uncertainty bounds through reconciliation by applying the same
+    per-zone scale factor used for point predictions.
+
+    For each zone, the scale factor is: reconciled / raw (population-weighted).
+    This factor is applied to lower and upper CI bounds, then clamped to [0, 100].
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    lower_col, upper_col : str
+        Columns with raw CI bounds.
+    raw_col : str
+        Column with raw (pre-reconciliation) point predictions.
+    reconciled_col : str
+        Column with reconciled point predictions.
+    zone_col : str
+    population_col : str
+    clamp_min, clamp_max : float
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of df with lower_col and upper_col updated to reconciled values.
+    """
+    result = df.copy()
+
+    valid_mask = (
+        result[raw_col].notna()
+        & result[reconciled_col].notna()
+        & result[lower_col].notna()
+        & result[upper_col].notna()
+        & result[zone_col].notna()
+        & (result[zone_col] != "Unknown")
+    )
+
+    zones = result.loc[valid_mask, zone_col].unique()
+
+    for zone in sorted(zones):
+        zmask = valid_mask & (result[zone_col] == zone)
+        raw_vals = result.loc[zmask, raw_col].values.astype(float)
+        pop = result.loc[zmask, population_col].values.astype(float)
+        pop = np.where(np.isnan(pop) | (pop < 0), 0.0, pop)
+
+        total_pop = pop.sum()
+        if total_pop > 0:
+            raw_mean = np.average(raw_vals, weights=pop)
+        else:
+            raw_mean = raw_vals.mean()
+
+        if raw_mean <= 0:
+            continue
+
+        recon_vals = result.loc[zmask, reconciled_col].values.astype(float)
+        if total_pop > 0:
+            recon_mean = np.average(recon_vals, weights=pop)
+        else:
+            recon_mean = recon_vals.mean()
+
+        scale_factor = recon_mean / raw_mean
+
+        result.loc[zmask, lower_col] = np.clip(
+            result.loc[zmask, lower_col].values * scale_factor, clamp_min, clamp_max,
+        )
+        result.loc[zmask, upper_col] = np.clip(
+            result.loc[zmask, upper_col].values * scale_factor, clamp_min, clamp_max,
+        )
+
+    logger.info(
+        "Uncertainty bounds (%s, %s) propagated through reconciliation.",
+        lower_col, upper_col,
+    )
     return result
 
 

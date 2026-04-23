@@ -59,7 +59,7 @@ dmypy.json
 # (keep CSVs and GPKG under version control if small enough)
 # -----------------------------------------------------------------------------
 
-# Rasters
+# Rasters and large geospatial binary formats
 *.tif
 *.tiff
 *.img
@@ -68,6 +68,16 @@ dmypy.json
 
 # Zip archives (raw downloads)
 *.zip
+
+# SPSS microdata files (licensed / confidential — do not commit)
+*.sav
+
+# Large generated output maps (Nigeria grid = 100K+ points, too large for GitHub)
+Data/outputs/nga/maps/*.html
+Data/outputs/nga/maps/*.geojson
+
+# Large derived feature files
+Data/Nigeria/features/nga_osm_buildings.parquet
 
 # Extracted raster temp files
 /tmp/
@@ -116,6 +126,47 @@ secrets.yaml
 secrets.json
 *.pem
 *.key
+
+# -----------------------------------------------------------------------------
+# Next.js visualization app (visualization/)
+# -----------------------------------------------------------------------------
+
+# Node dependencies
+visualization/node_modules/
+visualization/.pnp
+visualization/.pnp.js
+
+# Next.js build output
+visualization/.next/
+visualization/out/
+
+# Next.js cache
+visualization/.next/cache/
+
+# Environment files inside visualization
+visualization/.env
+visualization/.env.*
+visualization/.env.local
+visualization/.env.development.local
+visualization/.env.test.local
+visualization/.env.production.local
+
+# Next.js type declarations (auto-generated)
+visualization/next-env.d.ts
+
+# npm / yarn / pnpm debug logs
+visualization/npm-debug.log*
+visualization/yarn-debug.log*
+visualization/yarn-error.log*
+visualization/.pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# DHS raw data (licensed — do not commit)
+# -----------------------------------------------------------------------------
+NGHR7BFL/
+NGKR7BFL/
+NGGE7BFL/
+Data/Nigeria/dhs/
 
 # -----------------------------------------------------------------------------
 # Misc

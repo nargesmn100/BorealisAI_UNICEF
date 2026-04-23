@@ -19,31 +19,13 @@ We use LinearGAM with automatic lambda selection via grid search GCV.
 Splines are fitted for continuous features; binary/categorical features use
 linear terms.
 
-Uncertainty estimation
------------------------
-Two complementary approaches:
-
-1. pygam built-in confidence bands (Bayesian posterior approximation):
-   LinearGAM's prediction_intervals() uses the Bayesian credible interval
-   derived from the penalised spline fit.  These reflect model parameter
-   uncertainty but do not carry frequentist coverage guarantees.
-   Output: gam_moderate_lower / gam_moderate_upper.
-
-2. Split-conformal prediction:
-   Hold out a calibration fraction, fit the GAM on the remainder, compute
-   nonconformity scores on the calibration set, and derive a symmetric
-   interval with marginal coverage guarantee.
-   Output: gam_moderate_conformal_lower / gam_moderate_conformal_upper.
-
 Model outputs
 -------------
-  gam_raw_score                   : raw GAM prediction (before reconciliation)
-  gam_moderate                    : reconciled moderate prevalence
-  gam_severe                      : reconciled severe prevalence
-  gam_moderate_lower              : lower bound — pygam Bayesian bands
-  gam_moderate_upper              : upper bound — pygam Bayesian bands
-  gam_moderate_conformal_lower    : lower bound — split-conformal
-  gam_moderate_conformal_upper    : upper bound — split-conformal
+  gam_raw_score        : raw GAM prediction (before reconciliation)
+  gam_moderate         : reconciled moderate prevalence
+  gam_severe           : reconciled severe prevalence
+  gam_moderate_lower   : lower 90% CI from GAM's built-in confidence bands
+  gam_moderate_upper   : upper 90% CI from GAM's built-in confidence bands
 """
 
 import logging
@@ -58,8 +40,8 @@ try:
 except ImportError:
     _PYGAM_AVAILABLE = False
 
-from src.reconciliation.admin_reconcile import reconcile_predictions
-from src.utils.conformal import SplitConformalPredictor, calibration_split
+from src.reconciliation.admin_reconcile import reconcile_predictions, reconcile_uncertainty_bounds
+from src.utils.config_loader import get_available_features
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +81,7 @@ def _build_gam_terms(feature_names: list):
         if name in _LINEAR_FEATURES:
             term = l(i)
         else:
-            term = s(i, n_splines=10, constraints="monotone_dec"
+            term = s(i, n_splines=10, constraints="monotonic_dec"
                      if name == "rwi" else None)
         terms = term if terms is None else terms + term
     return terms
@@ -283,7 +265,7 @@ def run(
             "Install it with: pip install pygam"
         )
 
-    feature_cols = cfg["modeling"]["features"]
+    feature_cols = get_available_features(cfg, df)
     target_moderate = "moderate_prevalence"
     target_severe = "severe_prevalence"
     zone_col = cfg["modeling"]["admin_zone_col"]
@@ -336,6 +318,14 @@ def run(
 
     raw_preds = model.predict(X_pred)
 
+    clip_min = gam_cfg.get("clip_raw_min")
+    clip_max = gam_cfg.get("clip_raw_max")
+    if clip_min is not None or clip_max is not None:
+        lo = clip_min if clip_min is not None else -np.inf
+        hi = clip_max if clip_max is not None else np.inf
+        raw_preds = np.clip(raw_preds.astype(float), lo, hi)
+        logger.info("GAM raw scores clipped to [%.4f, %.4f] before reconciliation.", lo, hi)
+
     df = df.copy()
     df["gam_raw_score"] = np.nan
     df.loc[pred_mask, "gam_raw_score"] = raw_preds
@@ -369,64 +359,44 @@ def run(
     )
 
     # ------------------------------------------------------------------
-    # pygam built-in Bayesian confidence bands
+    # Reconcile depth metrics (same raw score, different targets)
     # ------------------------------------------------------------------
-    coverage = cfg["modeling"].get("conformal", {}).get("coverage", 0.90)
-    logger.info("Computing GAM Bayesian prediction intervals (%.0f%% CI)...", coverage * 100)
+    if "moderate_depth" in df.columns:
+        logger.info("Reconciling GAM predictions to depth targets...")
+        df = reconcile_predictions(
+            df, raw_score_col="gam_raw_score", target_col="moderate_depth",
+            zone_col=zone_col, population_col=pop_col,
+            output_col="gam_moderate_depth", strategy="population_weighted",
+        )
+        df = reconcile_predictions(
+            df, raw_score_col="gam_raw_score", target_col="severe_depth",
+            zone_col=zone_col, population_col=pop_col,
+            output_col="gam_severe_depth", strategy="population_weighted",
+        )
+
+    # ------------------------------------------------------------------
+    # Confidence intervals from GAM's built-in bands
+    # ------------------------------------------------------------------
+    logger.info("Computing GAM prediction intervals (90%% CI)...")
     try:
-        lower_raw, upper_raw = model.predict_intervals(X_pred, width=coverage)
+        lower_raw, upper_raw = model.predict_intervals(X_pred, width=0.90)
         df["gam_moderate_lower"] = np.nan
         df["gam_moderate_upper"] = np.nan
         df.loc[pred_mask, "gam_moderate_lower"] = lower_raw
         df.loc[pred_mask, "gam_moderate_upper"] = upper_raw
-        logger.info(
-            "pygam Bayesian intervals: mean width=%.4f pp",
-            (upper_raw - lower_raw).mean(),
+
+        # Propagate uncertainty bounds through reconciliation
+        df = reconcile_uncertainty_bounds(
+            df,
+            lower_col="gam_moderate_lower",
+            upper_col="gam_moderate_upper",
+            raw_col="gam_raw_score",
+            reconciled_col="gam_moderate",
+            zone_col=zone_col,
+            population_col=pop_col,
         )
     except Exception as e:
         logger.warning("Could not compute GAM prediction intervals: %s", e)
-
-    # ------------------------------------------------------------------
-    # Split-conformal prediction intervals
-    # Fits the GAM on a training subset, calibrates nonconformity scores
-    # on the held-out calibration split, then produces coverage-guaranteed
-    # symmetric intervals for all prediction cells.
-    # ------------------------------------------------------------------
-    conformal_cfg = cfg["modeling"].get("conformal", {})
-    cal_fraction = conformal_cfg.get("cal_fraction", 0.20)
-    rs = gam_cfg.get("random_state", 42)
-
-    logger.info(
-        "Fitting conformal predictor for GAM (coverage=%.0f%%, cal_fraction=%.0f%%)...",
-        coverage * 100, cal_fraction * 100,
-    )
-    try:
-        X_train_fit, X_cal, y_train_fit, y_cal = calibration_split(
-            X_train, y_train, cal_fraction=cal_fraction, random_state=rs
-        )
-        conformal_gam = GAMDeprivationModel(
-            n_splines=n_splines,
-            lam_candidates=lam_candidates,
-            max_iter=max_iter,
-            random_state=rs,
-        )
-        conformal_gam.fit(X_train_fit, y_train_fit, feature_names=feature_cols)
-        y_hat_cal = conformal_gam.predict(X_cal)
-
-        conformal = SplitConformalPredictor(coverage=coverage)
-        conformal.calibrate(y_cal, y_hat_cal)
-
-        conformal_lower, conformal_upper = conformal.predict_intervals(raw_preds)
-        df["gam_moderate_conformal_lower"] = np.nan
-        df["gam_moderate_conformal_upper"] = np.nan
-        df.loc[pred_mask, "gam_moderate_conformal_lower"] = conformal_lower
-        df.loc[pred_mask, "gam_moderate_conformal_upper"] = conformal_upper
-        logger.info(
-            "Conformal intervals: q̂=%.4f pp, interval width=%.4f pp",
-            conformal.q_hat, conformal.interval_width,
-        )
-    except Exception as e:
-        logger.warning("Could not compute GAM conformal intervals: %s", e)
 
     logger.info("GAM model predictions complete.")
     return df, model

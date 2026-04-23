@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #2563eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #ffffff;
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* SVG cursor for interactive regions */
+.region-polygon {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.cell-rect {
+  cursor: crosshair;
+  transition: opacity 0.1s ease;
+}
+
+/* Tooltip fade-in */
+.tooltip-enter {
+  animation: tooltipIn 0.1s ease-out;
+}
+
+@keyframes tooltipIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* View toggle button group */
+.toggle-btn {
+  @apply px-3 py-1.5 text-xs font-medium transition-colors duration-150;
+}
+
+.toggle-btn.active {
+  @apply bg-slate-900 text-white;
+}
+
+.toggle-btn.inactive {
+  @apply bg-white text-slate-600 hover:bg-slate-50;
+}

@@ -23,6 +23,9 @@ lightgbm>=4.0.0
 # GAM (optional — needed for gam_model.py)
 pygam>=0.9.0
 
+# Weakly Supervised Neural Network (optional — needed for weakly_supervised_nn.py)
+torch>=2.0.0
+
 # Interpretability (optional)
 # shap>=0.43.0      # for SHAP analysis in GBM model
 
@@ -32,6 +35,9 @@ pyyaml>=6.0
 # Data loading (Excel files)
 openpyxl>=3.1.0
 
+# MICS SPSS data reading (needed for Nigeria pipeline)
+pyreadstat>=1.2.0
+
 # Output serialisation
 pyarrow>=12.0.0      # for Parquet I/O
 
@@ -39,3 +45,6 @@ pyarrow>=12.0.0      # for Parquet I/O
 matplotlib>=3.7.0
 folium>=0.14.0         # for interactive HTML map output
 branca>=0.6.0          # colour scales for folium maps
+
+# Testing
+pytest>=7.0.0

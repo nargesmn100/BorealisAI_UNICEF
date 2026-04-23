@@ -1,6 +1,6 @@
 """
-UNICEF × RBC Borealis AI — Jamaica Child Deprivation Pipeline
-==============================================================
+UNICEF × RBC Borealis AI — Child Deprivation Disaggregation Pipeline
+=====================================================================
 
 Main entry point for the full research pipeline.
 
@@ -13,7 +13,8 @@ Phases executed:
 
 Usage
 -----
-    python main.py                          # Run full pipeline
+    python main.py                          # Run full pipeline (Jamaica default)
+    python main.py --country nga            # Run Nigeria pipeline
     python main.py --force-rerun            # Re-run all steps
     python main.py --skip-gbm              # Skip gradient boosting
     python main.py --phase data            # Only run data pipeline
@@ -54,8 +55,14 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Jamaica Child Deprivation Reconstruction Pipeline",
+        description="Child Deprivation Disaggregation Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--country",
+        type=str,
+        default=None,
+        help="Country code (e.g., 'nga' for Nigeria). Loads config/config_{country}.yaml.",
     )
     parser.add_argument(
         "--force-rerun",
@@ -76,16 +83,10 @@ def parse_args() -> argparse.Namespace:
         help="Skip the GAM model (requires: pip install pygam).",
     )
     parser.add_argument(
-        "--skip-ws",
+        "--skip-wsnn",
         action="store_true",
         default=False,
-        help="Skip weakly supervised models (WeaklySupervisedLinear + MLP).",
-    )
-    parser.add_argument(
-        "--skip-region-split",
-        action="store_true",
-        default=False,
-        help="Skip leave-one-zone-out cross-validation (faster runs).",
+        help="Skip the weakly supervised neural network (requires: pip install torch).",
     )
     parser.add_argument(
         "--phase",
@@ -113,14 +114,18 @@ def phase_data(cfg: dict, force_rerun: bool) -> pd.DataFrame:
 
 
 def phase_baselines(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
-    """Apply uniform and RWI baselines."""
+    """Apply uniform, heuristic, and RWI baselines."""
     from src.baselines.uniform import run as run_uniform
+    from src.baselines.heuristic import run as run_heuristic
     from src.baselines.rwi_redistribution import run as run_rwi
 
     logger.info("\n[Phase 3: Baselines]")
 
     logger.info("--- Applying Uniform Baseline ---")
     df = run_uniform(cfg, df)
+
+    logger.info("--- Applying Heuristic Baseline ---")
+    df = run_heuristic(cfg, df)
 
     logger.info("--- Applying RWI Redistribution Baseline ---")
     df = run_rwi(cfg, df)
@@ -133,7 +138,7 @@ def phase_models(
     df: pd.DataFrame,
     skip_gbm: bool = False,
     skip_gam: bool = False,
-    skip_ws: bool = False,
+    skip_wsnn: bool = False,
 ) -> tuple:
     """Train and apply ML models."""
     from src.models.ridge_model import run as run_ridge
@@ -179,24 +184,33 @@ def phase_models(
             logger.error("GBM model failed with error: %s", e, exc_info=True)
             logger.warning("Continuing without GBM predictions.")
 
-    # Weakly supervised models — the principled approach from the problem statement:
-    # train with zone-level aggregation loss instead of cell-level surrogate loss.
-    ws_linear = ws_mlp = ws_linear_imp = ws_mlp_imp = None
-    if not skip_ws:
-        logger.info("--- Fitting Weakly Supervised Models ---")
+    # Weakly Supervised Neural Network (optional - requires PyTorch)
+    wsnn_model = None
+    if not skip_wsnn:
+        logger.info("--- Fitting Weakly Supervised Neural Network (WSNN) ---")
         try:
-            from src.models.weakly_supervised_model import run as run_ws
-            df, ws_linear, ws_mlp, ws_linear_imp, ws_mlp_imp = run_ws(cfg, df)
+            from src.models.weakly_supervised_nn import run as run_wsnn
+            df, wsnn_model = run_wsnn(cfg, df)
+        except ImportError as e:
+            logger.warning(
+                "WSNN model skipped — PyTorch not installed: %s. "
+                "Install with: pip install torch",
+                e,
+            )
         except Exception as e:
-            logger.error("Weakly supervised models failed: %s", e, exc_info=True)
-            logger.warning("Continuing without weakly supervised predictions.")
+            logger.error("WSNN model failed: %s", e, exc_info=True)
+            logger.warning("Continuing without WSNN predictions.")
 
-    return df, ridge_model, gam_model, gbm_model, fi_df, ws_linear, ws_mlp, ws_linear_imp, ws_mlp_imp
+    return df, ridge_model, gam_model, gbm_model, fi_df
 
 
-def phase_eval(cfg: dict, df: pd.DataFrame) -> dict:
+def phase_eval(cfg: dict, df: pd.DataFrame, skip_gbm: bool = False, skip_gam: bool = False, skip_wsnn: bool = False) -> dict:
     """Run evaluation and return results dict."""
-    from src.evaluation.metrics import evaluate_all, format_eval_report
+    from src.evaluation.metrics import (
+        evaluate_all, format_eval_report,
+        paired_significance_tests, rwi_uncertainty_analysis,
+    )
+    from src.evaluation.zone_cv import leave_one_zone_out
 
     logger.info("\n[Phase 6: Evaluation]")
     results = evaluate_all(df, cfg)
@@ -205,21 +219,62 @@ def phase_eval(cfg: dict, df: pd.DataFrame) -> dict:
     logger.info("\n=== Evaluation Report ===")
     logger.info("\n%s", report.to_string())
 
+    # Leave-one-zone-out cross-validation
+    eval_dir = cfg["paths"]["eval_dir"]
+    os.makedirs(eval_dir, exist_ok=True)
+
+    logger.info("\n--- Leave-One-Zone-Out CV ---")
+    lozo_df = leave_one_zone_out(df, cfg, skip_gbm=skip_gbm, skip_gam=skip_gam, skip_wsnn=skip_wsnn)
+    if len(lozo_df) > 0:
+        lozo_path = os.path.join(eval_dir, "lozo_evaluation.csv")
+        lozo_df.to_csv(lozo_path, index=False)
+        logger.info("LOZO evaluation saved to: %s", lozo_path)
+
+    # Statistical significance tests
+    logger.info("\n--- Significance Tests ---")
+    sig_df = paired_significance_tests(df, cfg)
+    if len(sig_df) > 0:
+        sig_path = os.path.join(eval_dir, "significance_tests.csv")
+        sig_df.to_csv(sig_path, index=False)
+        logger.info("Significance tests saved to: %s", sig_path)
+
+    # RWI uncertainty analysis
+    logger.info("\n--- RWI Uncertainty Analysis ---")
+    rwi_unc_df = rwi_uncertainty_analysis(df)
+    if len(rwi_unc_df) > 0:
+        rwi_unc_path = os.path.join(eval_dir, "rwi_uncertainty_analysis.csv")
+        rwi_unc_df.to_csv(rwi_unc_path, index=False)
+        logger.info("RWI uncertainty analysis saved to: %s", rwi_unc_path)
+
+    # Two-level cross-validation (if enabled in config)
+    two_level_cfg = cfg.get("evaluation", {}).get("two_level_cv", {})
+    if two_level_cfg.get("enabled", False):
+        logger.info("\n--- Two-Level Cross-Validation ---")
+        try:
+            from src.evaluation.two_level_cv import two_level_cross_validation
+            max_folds = two_level_cfg.get("max_folds", 10)
+            tlcv_df = two_level_cross_validation(df, cfg, max_folds=max_folds)
+            if len(tlcv_df) > 0:
+                tlcv_path = os.path.join(eval_dir, "two_level_cv.csv")
+                tlcv_df.to_csv(tlcv_path, index=False)
+                logger.info("Two-level CV saved to: %s", tlcv_path)
+        except Exception as e:
+            logger.error("Two-level CV failed: %s", e, exc_info=True)
+
+    # --- Hierarchical Cross-Level Validation ---
+    hcv_cfg = cfg.get("evaluation", {}).get("hierarchical_cv", {})
+    if hcv_cfg.get("enabled", False):
+        logger.info("\n--- Hierarchical Cross-Level Validation ---")
+        try:
+            from src.evaluation.hierarchical_cv import hierarchical_validation
+            interim_dir = cfg["paths"]["interim_dir"]
+            hcv_df = hierarchical_validation(df, cfg, interim_dir=interim_dir, eval_dir=eval_dir)
+            if len(hcv_df) > 0:
+                results["hierarchical_cv"] = hcv_df
+        except Exception as e:
+            logger.error("Hierarchical CV failed: %s", e, exc_info=True)
+
     return results, report
-
-
-def phase_region_split_eval(cfg: dict, df: pd.DataFrame) -> dict:
-    """
-    Run leave-one-zone-out and within-zone holdout evaluation.
-
-    This tests whether the weakly supervised models can generalise to
-    zones they have never seen during training — the core generalisation
-    test from the problem statement.
-    """
-    from src.evaluation.region_split import run_region_split_evaluation
-
-    logger.info("\n[Phase 6b: Region-Split Generalisation Evaluation]")
-    return run_region_split_evaluation(df, cfg)
 
 
 def phase_outputs(
@@ -228,9 +283,6 @@ def phase_outputs(
     eval_results: dict,
     eval_report: pd.DataFrame,
     fi_df: pd.DataFrame = None,
-    ws_linear_imp: pd.DataFrame = None,
-    ws_mlp_imp: pd.DataFrame = None,
-    region_split_results: dict = None,
 ) -> None:
     """Save all outputs to disk."""
     logger.info("\n[Phase 7: Outputs]")
@@ -257,17 +309,27 @@ def phase_outputs(
 
     # Add model prediction columns if available
     for col in df.columns:
-        if any(col.startswith(p) for p in ["ridge_", "gam_", "gbm_", "ws_"]):
+        if any(col.startswith(p) for p in ["ridge_", "gam_", "gbm_", "heuristic_", "wsnn_"]):
             pred_cols.append(col)
 
     pred_cols = [c for c in pred_cols if c in df.columns]
     pred_table = df[pred_cols].copy()
 
-    pred_parquet = os.path.join(tables_dir, "jam_predictions.parquet")
-    pred_csv = os.path.join(tables_dir, "jam_predictions.csv")
+    output_prefix = cfg.get("country", {}).get("output_prefix", "jam")
+    pred_parquet = os.path.join(tables_dir, f"{output_prefix}_predictions.parquet")
+    pred_csv = os.path.join(tables_dir, f"{output_prefix}_predictions.csv")
     pred_table.to_parquet(pred_parquet, index=False)
     pred_table.to_csv(pred_csv, index=False)
     logger.info("Predictions saved to: %s  (%d rows)", pred_parquet, len(pred_table))
+
+    consolidated_path = os.path.join(tables_dir, f"{output_prefix}_full_consolidated.parquet")
+    df.to_parquet(consolidated_path, index=False)
+    logger.info(
+        "Full consolidated table (features + predictions): %s — %d rows × %d cols",
+        consolidated_path,
+        len(df),
+        len(df.columns),
+    )
 
     # ------------------------------------------------------------------
     # Evaluation report
@@ -291,29 +353,6 @@ def phase_outputs(
         logger.info("GBM feature importances saved to: %s", fi_path)
 
     # ------------------------------------------------------------------
-    # Weakly supervised model feature importances (permutation-based)
-    # ------------------------------------------------------------------
-    if ws_linear_imp is not None and isinstance(ws_linear_imp, pd.DataFrame):
-        p = os.path.join(eval_dir, "ws_linear_permutation_importance.csv")
-        ws_linear_imp.to_csv(p, index=False)
-        logger.info("WS-Linear permutation importances saved to: %s", p)
-
-    if ws_mlp_imp is not None and isinstance(ws_mlp_imp, pd.DataFrame):
-        p = os.path.join(eval_dir, "ws_mlp_permutation_importance.csv")
-        ws_mlp_imp.to_csv(p, index=False)
-        logger.info("WS-MLP permutation importances saved to: %s", p)
-
-    # ------------------------------------------------------------------
-    # Region-split evaluation results (LOSO CV + within-zone holdout)
-    # ------------------------------------------------------------------
-    if region_split_results:
-        for key, df_res in region_split_results.items():
-            if isinstance(df_res, pd.DataFrame) and len(df_res) > 0:
-                p = os.path.join(eval_dir, f"region_split_{key}.csv")
-                df_res.to_csv(p, index=False)
-                logger.info("Region split result '%s' saved to: %s", key, p)
-
-    # ------------------------------------------------------------------
     # Map-ready GeoJSON (for quick visualisation)
     # ------------------------------------------------------------------
     try:
@@ -325,7 +364,7 @@ def phase_outputs(
             modeling_subset["longitude"], modeling_subset["latitude"]
         )
         gdf = gpd.GeoDataFrame(modeling_subset, geometry=geometry, crs="EPSG:4326")
-        geojson_path = os.path.join(maps_dir, "jam_predictions.geojson")
+        geojson_path = os.path.join(maps_dir, f"{output_prefix}_predictions.geojson")
         gdf.to_file(geojson_path, driver="GeoJSON")
         logger.info("Map-ready GeoJSON saved to: %s", geojson_path)
     except Exception as e:
@@ -380,7 +419,7 @@ def phase_outputs(
                     ),
                 ).add_to(fmap)
 
-        html_path = os.path.join(maps_dir, "jam_predictions_map.html")
+        html_path = os.path.join(maps_dir, f"{output_prefix}_predictions_map.html")
         fmap.save(html_path)
         logger.info("Folium interactive map saved to: %s", html_path)
     except ImportError:
@@ -388,6 +427,97 @@ def phase_outputs(
                     "Install with: pip install folium branca")
     except Exception as e:
         logger.warning("Could not save Folium map: %s", e)
+
+    # ------------------------------------------------------------------
+    # Uncertainty map (CI width) — requires folium + CI columns
+    # ------------------------------------------------------------------
+    try:
+        import folium
+        import branca.colormap as cm
+
+        # Find the best available CI columns
+        ci_priority = [
+            ("gbm_moderate_lower", "gbm_moderate_upper", "gbm_moderate"),
+            ("gam_moderate_lower", "gam_moderate_upper", "gam_moderate"),
+            ("ridge_moderate_lower", "ridge_moderate_upper", "ridge_moderate"),
+        ]
+        ci_cols = None
+        for lower_c, upper_c, pred_c in ci_priority:
+            if lower_c in pred_table.columns and upper_c in pred_table.columns:
+                ci_cols = (lower_c, upper_c, pred_c)
+                break
+
+        if ci_cols is not None:
+            lower_c, upper_c, pred_c = ci_cols
+            unc_df = pred_table[
+                pred_table["moderate_prevalence"].notna()
+                & pred_table[lower_c].notna()
+            ].copy()
+            unc_df["ci_width"] = unc_df[upper_c] - unc_df[lower_c]
+
+            center_lat = unc_df["latitude"].mean()
+            center_lon = unc_df["longitude"].mean()
+
+            umap = folium.Map(
+                location=[center_lat, center_lon], zoom_start=9,
+                tiles="CartoDB positron",
+            )
+
+            vmin = unc_df["ci_width"].quantile(0.02)
+            vmax = unc_df["ci_width"].quantile(0.98)
+            colormap = cm.LinearColormap(
+                ["#2166ac", "#f7f7f7", "#d73027"],
+                vmin=vmin, vmax=vmax,
+                caption="90% CI Width (pp)",
+            )
+            colormap.add_to(umap)
+
+            for _, row in unc_df.iterrows():
+                w = row["ci_width"]
+                if pd.isna(w):
+                    continue
+                folium.CircleMarker(
+                    location=[row["latitude"], row["longitude"]],
+                    radius=4,
+                    color=None,
+                    fill=True,
+                    fill_color=colormap(np.clip(w, vmin, vmax)),
+                    fill_opacity=0.75,
+                    popup=folium.Popup(
+                        f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
+                        f"CI width: {w:.2f} pp<br>"
+                        f"Lower: {row[lower_c]:.1f}%<br>"
+                        f"Upper: {row[upper_c]:.1f}%<br>"
+                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%",
+                        max_width=220,
+                    ),
+                ).add_to(umap)
+
+            unc_html_path = os.path.join(maps_dir, f"{output_prefix}_uncertainty_map.html")
+            umap.save(unc_html_path)
+            logger.info("Uncertainty map saved to: %s", unc_html_path)
+        else:
+            logger.info("No CI columns found — skipping uncertainty map.")
+
+    except ImportError:
+        logger.info("folium not installed — skipping uncertainty map.")
+    except Exception as e:
+        logger.warning("Could not save uncertainty map: %s", e)
+
+    # ------------------------------------------------------------------
+    # LGA-level aggregation (Nigeria only — GADM ADM2)
+    # ------------------------------------------------------------------
+    country_code = cfg.get("country", {}).get("code", "")
+    if country_code == "NGA":
+        try:
+            from src.outputs.lga_aggregation import aggregate_to_lga
+            lga_csv, lga_geojson = aggregate_to_lga(cfg, pred_table)
+            if lga_csv:
+                logger.info("LGA-level predictions saved to: %s", lga_csv)
+            if lga_geojson:
+                logger.info("LGA GeoJSON saved to: %s", lga_geojson)
+        except Exception as e:
+            logger.warning("LGA aggregation failed: %s", e)
 
     logger.info("All outputs saved to: %s", cfg["paths"]["outputs_dir"])
 
@@ -398,17 +528,25 @@ def phase_outputs(
 
 def main() -> None:
     args = parse_args()
-    cfg = load_config(args.config)
+
+    # Resolve config path: --config takes priority, then --country, then default
+    config_path = args.config
+    if config_path is None and args.country:
+        from src.utils.config_loader import find_project_root
+        project_root = find_project_root()
+        config_path = os.path.join(
+            project_root, "config", f"config_{args.country.lower()}.yaml"
+        )
+
+    cfg = load_config(config_path)
     setup_logging(cfg)
 
+    country_name = cfg.get("country", {}).get("name", "Jamaica")
+
     logger.info("=" * 60)
-    logger.info("UNICEF × RBC Borealis AI — Jamaica Child Deprivation Pipeline")
-    logger.info(
-        "Phase: %s | Force rerun: %s | Skip GBM: %s | Skip GAM: %s | "
-        "Skip WS: %s | Skip region-split: %s",
-        args.phase, args.force_rerun, args.skip_gbm, args.skip_gam,
-        args.skip_ws, args.skip_region_split,
-    )
+    logger.info("UNICEF × RBC Borealis AI — %s Child Deprivation Pipeline", country_name)
+    logger.info("Phase: %s | Force rerun: %s | Skip GBM: %s | Skip GAM: %s",
+                args.phase, args.force_rerun, args.skip_gbm, args.skip_gam)
     logger.info("=" * 60)
 
     # Phase 1+2: Data pipeline
@@ -426,8 +564,8 @@ def main() -> None:
         return
 
     # Phase 4: ML Models
-    df, ridge_model, gam_model, gbm_model, fi_df, ws_linear, ws_mlp, ws_linear_imp, ws_mlp_imp = phase_models(
-        cfg, df, skip_gbm=args.skip_gbm, skip_gam=args.skip_gam, skip_ws=args.skip_ws,
+    df, ridge_model, gam_model, gbm_model, fi_df = phase_models(
+        cfg, df, skip_gbm=args.skip_gbm, skip_gam=args.skip_gam, skip_wsnn=args.skip_wsnn
     )
 
     if args.phase == "models":
@@ -438,16 +576,24 @@ def main() -> None:
     logger.info("\n[Phase 5: Reconciliation Verification]")
     from src.reconciliation.admin_reconcile import verify_reconciliation
 
-    reconcile_cols = [
+    verification_pairs = [
         ("uniform_moderate", "moderate_prevalence"),
+        ("heuristic_moderate", "moderate_prevalence"),
         ("rwi_moderate", "moderate_prevalence"),
         ("ridge_moderate", "moderate_prevalence"),
         ("gam_moderate", "moderate_prevalence"),
         ("gbm_moderate", "moderate_prevalence"),
-        ("ws_linear_moderate", "moderate_prevalence"),
-        ("ws_mlp_moderate", "moderate_prevalence"),
+        ("wsnn_moderate", "moderate_prevalence"),
+        # Depth metrics
+        ("uniform_moderate_depth", "moderate_depth"),
+        ("heuristic_moderate_depth", "moderate_depth"),
+        ("rwi_moderate_depth", "moderate_depth"),
+        ("ridge_moderate_depth", "moderate_depth"),
+        ("gam_moderate_depth", "moderate_depth"),
+        ("gbm_moderate_depth", "moderate_depth"),
+        ("wsnn_moderate_depth", "moderate_depth"),
     ]
-    for col, target_col in reconcile_cols:
+    for col, target_col in verification_pairs:
         if col in df.columns:
             ok = verify_reconciliation(
                 df, col, target_col, "subregion", "population"
@@ -459,25 +605,12 @@ def main() -> None:
                     col,
                 )
 
-    region_split_results = None
     if args.phase == "eval" or args.phase == "all":
         # Phase 6: Evaluation
-        eval_results, eval_report = phase_eval(cfg, df)
-
-        # Phase 6b: Region-split evaluation (LOSO CV)
-        if not args.skip_region_split and not args.skip_ws:
-            region_split_results = phase_region_split_eval(cfg, df)
-        else:
-            logger.info("Skipping region-split evaluation.")
+        eval_results, eval_report = phase_eval(cfg, df, skip_gbm=args.skip_gbm, skip_gam=args.skip_gam, skip_wsnn=args.skip_wsnn)
 
         # Phase 7: Outputs
-        phase_outputs(
-            cfg, df, eval_results, eval_report,
-            fi_df=fi_df,
-            ws_linear_imp=ws_linear_imp,
-            ws_mlp_imp=ws_mlp_imp,
-            region_split_results=region_split_results,
-        )
+        phase_outputs(cfg, df, eval_results, eval_report, fi_df=fi_df)
 
     logger.info("\nPipeline complete.")
 

@@ -49,10 +49,172 @@ import os
 
 import pandas as pd
 import numpy as np
+from scipy.stats import norm
 
-from src.utils.config_loader import load_config, setup_logging
+from src.utils.config_loader import load_config, setup_logging, get_available_features
 
 logger = logging.getLogger(__name__)
+
+
+def _assign_dhs_nearest_dep_features(merged: pd.DataFrame, project_root: str) -> pd.DataFrame:
+    """
+    For each grid cell, attach DHS cluster deprivation (nearest cluster by lon/lat)
+    and great-circle distance in km. Requires merge_dhs_gps output CSV.
+    """
+    csv_path = os.path.join(project_root, "Data/Nigeria/dhs/nga_dhs_cluster_deprivation_geo.csv")
+    if not os.path.isfile(csv_path):
+        return merged
+    try:
+        from scipy.spatial import cKDTree
+        dhs = pd.read_csv(csv_path)
+        required = ("LONGNUM", "LATNUM", "deprivation_index")
+        if not all(c in dhs.columns for c in required):
+            return merged
+        cl = np.column_stack([dhs["LONGNUM"].values, dhs["LATNUM"].values])
+        tree = cKDTree(cl)
+        lon = merged["longitude"].to_numpy(dtype=float)
+        lat = merged["latitude"].to_numpy(dtype=float)
+        pts = np.column_stack([lon, lat])
+        _, idx = tree.query(pts, k=1)
+        dhs_dep = dhs["deprivation_index"].to_numpy()
+        cl_lon = dhs["LONGNUM"].to_numpy()[idx]
+        cl_lat = dhs["LATNUM"].to_numpy()[idx]
+        merged = merged.copy()
+        merged["dhs_nearest_dep_index"] = dhs_dep[idx]
+        # Haversine distance (km) cell → assigned cluster
+        r_km = 6371.0
+        lon1, lat1, lon2, lat2 = map(np.radians, (lon, lat, cl_lon, cl_lat))
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = (
+            np.sin(dlat / 2.0) ** 2
+            + np.cos(lat1) * np.cos(lat2) * (np.sin(dlon / 2.0) ** 2)
+        )
+        merged["dist_km_nearest_dhs_cluster"] = 2.0 * r_km * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+        logger.info(
+            "DHS nearest-cluster features attached (%d cells).",
+            int(merged["dhs_nearest_dep_index"].notna().sum()),
+        )
+    except Exception as e:
+        logger.warning("Could not assign DHS nearest-cluster features: %s", e)
+    return merged
+
+
+def _assign_quintile_memberships(
+    df: pd.DataFrame,
+    quintile_targets: pd.DataFrame,
+    zone_col: str = "subregion",
+) -> pd.DataFrame:
+    """
+    Compute soft quintile membership probabilities and quintile-weighted pseudo-targets.
+
+    For each cell, computes its within-zone RWI percentile, maps that to
+    quintile probabilities using a smooth kernel, then produces a continuous
+    pseudo-target as the weighted average of quintile prevalences.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Modeling table with RWI and subregion columns.
+    quintile_targets : pd.DataFrame
+        Quintile target table with columns: subregion, quintile, moderate_prevalence,
+        severe_prevalence.
+    zone_col : str
+        Column name for zone assignment.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input dataframe with added columns: p_q1..p_q5, quintile_target_moderate,
+        quintile_target_severe.
+    """
+    df = df.copy()
+
+    # Quintile boundaries (percentile cutoffs: 0-20, 20-40, 40-60, 60-80, 80-100)
+    quintile_centers = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
+    quintile_names = ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    bandwidth = 0.15  # controls smoothness of quintile membership
+
+    # Initialize columns
+    for q in quintile_names:
+        df[f"p_{q.lower()}"] = 0.0
+    df["quintile_target_moderate"] = np.nan
+    df["quintile_target_severe"] = np.nan
+
+    zones = df[zone_col].unique()
+    zones = [z for z in zones if z != "Unknown"]
+
+    for zone in zones:
+        zone_mask = df[zone_col] == zone
+        rwi_vals = df.loc[zone_mask, "rwi"].values
+
+        if len(rwi_vals) == 0:
+            continue
+
+        # Compute within-zone percentile (0=poorest, 1=richest)
+        # rank(pct=True) gives low percentile to low RWI (poor) cells
+        # Q1 center=0.1 (poorest), Q5 center=0.9 (richest)
+        # So low RWI → low pctile → near Q1 center → high P(Q1) → high deprivation
+        pctile = pd.Series(rwi_vals).rank(pct=True).values
+
+        # Compute soft quintile membership using Gaussian kernel
+        probs = np.zeros((len(rwi_vals), 5))
+        for qi, center in enumerate(quintile_centers):
+            probs[:, qi] = norm.pdf(pctile, loc=center, scale=bandwidth)
+
+        # Normalize to sum to 1
+        row_sums = probs.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        probs = probs / row_sums
+
+        for qi, qname in enumerate(quintile_names):
+            df.loc[zone_mask, f"p_{qname.lower()}"] = probs[:, qi]
+
+        # Look up quintile prevalences for this zone
+        zone_qt = quintile_targets[quintile_targets["subregion"] == zone]
+        if len(zone_qt) == 0:
+            # Fall back to national (_T) quintile targets
+            zone_qt = quintile_targets[quintile_targets["subregion"] == "_T"]
+
+        if len(zone_qt) == 0:
+            logger.warning("No quintile targets found for zone '%s'. Skipping.", zone)
+            continue
+
+        # Build prevalence vectors
+        mod_prev = np.zeros(5)
+        sev_prev = np.zeros(5)
+        for qi, qname in enumerate(quintile_names):
+            q_row = zone_qt[zone_qt["quintile"] == qname]
+            if len(q_row) > 0:
+                mod_prev[qi] = q_row["moderate_prevalence"].iloc[0]
+                sev_prev[qi] = q_row["severe_prevalence"].iloc[0]
+
+        # Compute weighted pseudo-target: sum(P(Qk) * prevalence(Qk))
+        qt_mod = probs @ mod_prev
+        qt_sev = probs @ sev_prev
+        df.loc[zone_mask, "quintile_target_moderate"] = qt_mod
+        df.loc[zone_mask, "quintile_target_severe"] = qt_sev
+
+    # Log summary
+    valid = df["quintile_target_moderate"].notna()
+    if valid.sum() > 0:
+        logger.info(
+            "Quintile pseudo-targets assigned to %d cells. "
+            "Moderate range: [%.1f%%, %.1f%%], mean=%.1f%%",
+            valid.sum(),
+            df.loc[valid, "quintile_target_moderate"].min(),
+            df.loc[valid, "quintile_target_moderate"].max(),
+            df.loc[valid, "quintile_target_moderate"].mean(),
+        )
+        # Verify probabilities sum to 1
+        p_cols = [f"p_{q.lower()}" for q in quintile_names]
+        p_sums = df.loc[valid, p_cols].sum(axis=1)
+        logger.info(
+            "Quintile probability sums: min=%.4f, max=%.4f (should be ~1.0)",
+            p_sums.min(), p_sums.max(),
+        )
+
+    return df
 
 
 def merge_features_and_targets(
@@ -91,9 +253,12 @@ def merge_features_and_targets(
             "Ensure Step 04 (prepare_targets) has been run."
         )
 
-    # Filter targets to subnational rows only (exclude national _T)
-    national_code = cfg["targets"]["subregion_national"]
-    subnational_targets = targets[targets["subregion"] != national_code].copy()
+    # Filter targets to subnational rows only (exclude national _T if present)
+    national_code = cfg["targets"].get("subregion_national")
+    if national_code:
+        subnational_targets = targets[targets["subregion"] != national_code].copy()
+    else:
+        subnational_targets = targets.copy()
 
     subregions_in_grid = set(grid_admin["subregion"].unique())
     subregions_in_targets = set(subnational_targets["subregion"].unique())
@@ -157,15 +322,19 @@ def merge_features_and_targets(
     logger.info("Imputing missing feature values...")
 
     # Population: NaN means no population raster coverage → treat as 0
-    # (usually coastal pixels or unpopulated wilderness)
+    # (spatial imputation in step02 should have filled most; fill remaining with 0)
     if "population" in merged.columns:
         n_pop_missing = merged["population"].isna().sum()
         if n_pop_missing > 0:
             logger.info(
-                "Imputing %d missing population values with 0 "
-                "(likely coastal/offshore pixels with no raster coverage).",
+                "Filling %d remaining missing population values with 0 "
+                "(after spatial imputation, these are beyond max_distance).",
                 n_pop_missing,
             )
+            # Mark these as imputed too
+            if "population_imputed" not in merged.columns:
+                merged["population_imputed"] = 0
+            merged.loc[merged["population"].isna(), "population_imputed"] = 1
             merged["population"] = merged["population"].fillna(0.0)
             merged["log_population"] = np.log1p(merged["population"])
 
@@ -189,25 +358,6 @@ def merge_features_and_targets(
             )
 
     # ------------------------------------------------------------------
-    # Feature completeness check
-    # ------------------------------------------------------------------
-    feature_cols = cfg["modeling"]["features"]
-    for col in feature_cols:
-        if col not in merged.columns:
-            logger.warning(
-                "Feature '%s' listed in config but not found in modeling table. "
-                "Check pipeline steps.",
-                col,
-            )
-        else:
-            n_missing = merged.loc[merged["in_modeling_sample"], col].isna().sum()
-            if n_missing > 0:
-                logger.warning(
-                    "Feature '%s': %d missing values in modeling sample after imputation.",
-                    col, n_missing,
-                )
-
-    # ------------------------------------------------------------------
     # Summary statistics of targets
     # ------------------------------------------------------------------
     logger.info("Target value summary by subregion:")
@@ -217,6 +367,130 @@ def merge_features_and_targets(
         .first()
     )
     logger.info("\n%s", summary.to_string())
+
+    # ------------------------------------------------------------------
+    # New enrichment features (Nigeria only) — nightlights, schools, health,
+    # conflict, rainfall — pre-computed in Data/Nigeria/features/
+    # ------------------------------------------------------------------
+    country_code = cfg.get("country", {}).get("code", "")
+    new_feats_path = cfg.get("paths", {}).get("new_features_parquet", "")
+    if country_code == "NGA" and new_feats_path and os.path.isfile(new_feats_path):
+        try:
+            new_feats = pd.read_parquet(new_feats_path)
+            # Join on longitude + latitude (rounded to avoid float drift)
+            key_cols = ["longitude", "latitude"]
+            for c in key_cols:
+                merged[c] = merged[c].round(6)
+                new_feats[c] = new_feats[c].round(6)
+            feat_cols = [c for c in new_feats.columns if c not in key_cols and c not in merged.columns]
+            merged = merged.merge(new_feats[key_cols + feat_cols], on=key_cols, how="left")
+            logger.info(
+                "New enrichment features joined: %s — %d cells matched.",
+                feat_cols, merged[feat_cols[0]].notna().sum() if feat_cols else 0,
+            )
+        except Exception as e:
+            logger.warning("Could not join new enrichment features: %s", e)
+
+    # ------------------------------------------------------------------
+    # Education + Health utilization features (Nigeria only)
+    # Extracted from MICS6 2021 microdata — state × urban/rural level
+    # ------------------------------------------------------------------
+    country_code = cfg.get("country", {}).get("code", "")
+    if country_code == "NGA":
+        try:
+            edu_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "Data/Nigeria/features/education/nga_mics_education_by_state_urbanrural.csv",
+            )
+            if os.path.isfile(edu_path):
+                edu = pd.read_csv(edu_path)
+                edu["is_urban_flag"] = (edu["urban_rural"] == "urban").astype(int)
+                edu = edu.rename(columns={"state": "subregion"})[
+                    ["subregion", "is_urban_flag",
+                     "school_attendance_rate", "ever_attended_rate", "public_school_rate"]
+                ]
+                merged["is_urban_flag"] = merged["is_urban"].astype(int)
+                pre_len = len(merged)
+                merged = merged.merge(edu, on=["subregion", "is_urban_flag"], how="left")
+                logger.info(
+                    "Education features joined: %d/%d cells matched.",
+                    merged["school_attendance_rate"].notna().sum(), pre_len,
+                )
+                merged = merged.drop(columns=["is_urban_flag"], errors="ignore")
+        except Exception as e:
+            logger.warning("Could not join education features: %s", e)
+
+    # Health utilization features
+    if country_code == "NGA":
+        try:
+            health_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "Data/Nigeria/features/health/nga_mics_health_by_state_urbanrural.csv",
+            )
+            if os.path.isfile(health_path):
+                health = pd.read_csv(health_path)
+                health["is_urban_flag"] = (health["urban_rural"] == "urban").astype(int)
+                health_cols = ["anc_rate", "skilled_delivery_rate",
+                               "facility_delivery_rate", "vacc_card_rate", "diarrhea_care_rate"]
+                existing_health_cols = [c for c in health_cols if c in health.columns]
+                health = health.rename(columns={"state": "subregion"})[
+                    ["subregion", "is_urban_flag"] + existing_health_cols
+                ]
+                if "is_urban_flag" not in merged.columns:
+                    merged["is_urban_flag"] = merged["is_urban"].astype(int)
+                pre_len = len(merged)
+                merged = merged.merge(health, on=["subregion", "is_urban_flag"], how="left")
+                logger.info(
+                    "Health utilization features joined: %d/%d cells matched.",
+                    merged["anc_rate"].notna().sum() if "anc_rate" in merged.columns else 0,
+                    pre_len,
+                )
+                merged = merged.drop(columns=["is_urban_flag"], errors="ignore")
+        except Exception as e:
+            logger.warning("Could not join health utilization features: %s", e)
+
+    # ------------------------------------------------------------------
+    # Hierarchy columns (Nigeria only) — needed for hierarchical validation
+    # ------------------------------------------------------------------
+    if country_code == "NGA":
+        try:
+            from src.utils.admin_mappings import add_geopolitical_zones, add_state_urban_rural
+            merged = add_geopolitical_zones(merged, zone_col="subregion")
+            merged = add_state_urban_rural(merged, state_col="subregion", urban_col="is_urban")
+            logger.info("Nigeria hierarchy columns added: geopolitical_zone, state_urban_rural.")
+        except Exception as e:
+            logger.warning("Could not add Nigeria hierarchy columns: %s", e)
+
+        pr = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        merged = _assign_dhs_nearest_dep_features(merged, pr)
+
+    # ------------------------------------------------------------------
+    # Feature completeness (after all feature joins)
+    # ------------------------------------------------------------------
+    feature_cols = get_available_features(cfg, merged)
+    for col in feature_cols:
+        n_missing = merged.loc[merged["in_modeling_sample"], col].isna().sum()
+        if n_missing > 0:
+            logger.warning(
+                "Feature '%s': %d missing values in modeling sample after imputation.",
+                col, n_missing,
+            )
+
+    # ------------------------------------------------------------------
+    # Quintile-based pseudo-targets (if available)
+    # ------------------------------------------------------------------
+    output_prefix = cfg.get("country", {}).get("output_prefix", "jam")
+    quintile_path = os.path.join(
+        os.path.dirname(cfg["paths"]["targets_file"]),
+        f"{output_prefix}_quintile_targets.csv",
+    )
+    if cfg["targets"].get("use_quintile_targets", False) and os.path.isfile(quintile_path):
+        logger.info("Loading quintile targets from: %s", quintile_path)
+        quintile_targets = pd.read_csv(quintile_path)
+        zone_col = cfg["modeling"]["admin_zone_col"]
+        merged = _assign_quintile_memberships(merged, quintile_targets, zone_col)
+    else:
+        logger.info("Quintile targets not available or disabled. Skipping quintile membership.")
 
     return merged
 
