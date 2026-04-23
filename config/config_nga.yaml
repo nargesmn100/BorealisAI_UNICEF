@@ -111,6 +111,16 @@ modeling:
     - "rainfall_mm"
     - "ghsl_built_frac"
     - "log_ghsl_built"
+    - "school_attendance_rate"
+    - "ever_attended_rate"
+    - "public_school_rate"
+    - "anc_rate"
+    - "skilled_delivery_rate"
+    - "facility_delivery_rate"
+    - "vacc_card_rate"
+    - "diarrhea_care_rate"
+    - "dhs_nearest_dep_index"
+    - "dist_km_nearest_dhs_cluster"
 
   primary_target:   "moderate_prevalence"
   secondary_target: "severe_prevalence"
@@ -122,6 +132,9 @@ modeling:
     alpha_candidates: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
     cv_folds: 5
     random_state: 42
+    # Optional: blend zone (or quintile) targets with DHS cluster deprivation (0–1 → %)
+    use_dhs_soft_label: true
+    dhs_soft_label_weight: 0.4
 
   # Gradient boosted trees
   gbm:
@@ -139,6 +152,9 @@ modeling:
     lam_candidates: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
     max_iter: 100
     random_state: 42
+    # Clip raw GAM scores before reconciliation (reduces LOZO / extreme aggregates)
+    clip_raw_min: 0.0
+    clip_raw_max: 120.0
 
   # Uncertainty estimation (bootstrap — Ridge)
   uncertainty:

@@ -15,22 +15,22 @@ import RegionSummaryCard from '@/components/RegionSummaryCard';
 import AggregationPanel from '@/components/AggregationPanel';
 import CellTooltip from '@/components/CellTooltip';
 import StepsExplainer from '@/components/StepsExplainer';
+import CellTable from '@/components/CellTable';
+import CellInsightsPanel from '@/components/CellInsightsPanel';
 
 // ─── View / Resolution toggles ────────────────────────────────────────────────
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
   { value: 'coarse', label: 'Coarse regions' },
-  { value: 'fine',   label: 'Fine grid' },
-  { value: 'both',   label: 'Overlay both' },
+  { value: 'fine',   label: 'Fine grid'      },
+  { value: 'both',   label: 'Overlay both'   },
 ];
 
 const RES_OPTIONS: { value: Resolution; label: string; sub: string }[] = [
-  { value: 'coarse', label: 'Coarse',  sub: '140 cells'  },
-  { value: 'medium', label: 'Medium',  sub: '315 cells'  },
-  { value: 'fine',   label: 'Fine',    sub: '560 cells'  },
+  { value: 'coarse', label: 'Coarse', sub: '~140 cells' },
+  { value: 'medium', label: 'Medium', sub: '~315 cells' },
+  { value: 'fine',   label: 'Fine',   sub: '~560 cells' },
 ];
-
-// ─── Tooltip state ────────────────────────────────────────────────────────────
 
 interface TooltipInfo {
   cell: GridCell;
@@ -45,12 +45,11 @@ export default function Page() {
   const [resolution,       setResolution]       = useState<Resolution>('medium');
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [hoveredRegionId,  setHoveredRegionId]  = useState<string | null>(null);
+  const [selectedCellId,   setSelectedCellId]   = useState<string | null>(null);
   const [tooltip,          setTooltip]          = useState<TooltipInfo | null>(null);
 
-  // Regenerate cells when resolution changes
   const cells = useMemo(() => generateCells(resolution), [resolution]);
 
-  // Derived: region + stats for selected region
   const selectedRegion = useMemo(
     () => REGIONS.find(r => r.id === selectedRegionId) ?? null,
     [selectedRegionId],
@@ -60,7 +59,11 @@ export default function Page() {
     [cells, selectedRegion],
   );
 
-  // Tooltip region
+  const selectedCell = useMemo(
+    () => selectedCellId ? cells.find(c => c.id === selectedCellId) ?? null : null,
+    [cells, selectedCellId],
+  );
+
   const tooltipRegion = useMemo(
     () => tooltip ? REGIONS.find(r => r.id === tooltip.cell.regionId) ?? null : null,
     [tooltip],
@@ -70,18 +73,13 @@ export default function Page() {
 
   const handleRegionClick = useCallback((id: string) => {
     setSelectedRegionId(prev => (prev === id ? null : id));
+    setSelectedCellId(null);
     setTooltip(null);
-    // Automatically switch to coarse view when selecting a region
     if (viewMode === 'fine') setViewMode('coarse');
   }, [viewMode]);
 
-  const handleRegionEnter = useCallback((id: string) => {
-    setHoveredRegionId(id);
-  }, []);
-
-  const handleRegionLeave = useCallback(() => {
-    setHoveredRegionId(null);
-  }, []);
+  const handleRegionEnter  = useCallback((id: string) => setHoveredRegionId(id), []);
+  const handleRegionLeave  = useCallback(() => setHoveredRegionId(null), []);
 
   const handleCellEnter = useCallback((cell: GridCell, screenX: number, screenY: number) => {
     setTooltip({ cell, screenX, screenY });
@@ -93,10 +91,23 @@ export default function Page() {
     setHoveredRegionId(null);
   }, []);
 
+  /** Click on map cell — select cell + its region, switch to fine/both view */
+  const handleMapCellClick = useCallback((cell: GridCell) => {
+    setSelectedCellId(prev => (prev === cell.id ? null : cell.id));
+    setSelectedRegionId(cell.regionId);
+    if (viewMode === 'coarse') setViewMode('fine');
+  }, [viewMode]);
+
+  /** Click on table row — select cell + its region, ensure grid is visible */
+  const handleTableCellSelect = useCallback((cell: GridCell) => {
+    setSelectedCellId(prev => (prev === cell.id ? null : cell.id));
+    setSelectedRegionId(cell.regionId);
+    if (viewMode === 'coarse') setViewMode('fine');
+  }, [viewMode]);
+
   const handleViewChange = useCallback((v: ViewMode) => {
     setViewMode(v);
     setTooltip(null);
-    // Clear region selection when switching to fine-only (no region borders visible)
     if (v === 'fine') setSelectedRegionId(null);
   }, []);
 
@@ -118,7 +129,6 @@ export default function Page() {
                 Click a region to explore its grid-cell decomposition.
               </p>
             </div>
-            {/* Legend */}
             <div className="flex-shrink-0 pt-1">
               <Legend />
             </div>
@@ -145,7 +155,7 @@ export default function Page() {
             </div>
           </div>
 
-          {/* Resolution toggle (only relevant in fine/both modes) */}
+          {/* Resolution toggle */}
           <div>
             <p className="text-[9px] uppercase tracking-widest text-slate-400 mb-1.5">Resolution</p>
             <div className="inline-flex border border-slate-200 rounded-lg overflow-hidden">
@@ -167,23 +177,30 @@ export default function Page() {
             </div>
           </div>
 
-          {/* Hint text */}
-          {viewMode === 'coarse' && (
+          {/* Context hint */}
+          {viewMode === 'coarse' && !selectedRegionId && (
             <p className="text-[11px] text-slate-400 italic ml-2">
-              Click a region to select it → then switch to &quot;Fine grid&quot; or &quot;Overlay both&quot;
+              Click a region to select it
             </p>
           )}
-          {viewMode !== 'coarse' && !selectedRegionId && (
+          {viewMode !== 'coarse' && !selectedCellId && (
             <p className="text-[11px] text-slate-400 italic ml-2">
-              Hover over cells to see predicted features
+              Click a cell to pin it · hover to preview
             </p>
+          )}
+          {selectedCellId && (
+            <button
+              onClick={() => setSelectedCellId(null)}
+              className="ml-auto text-[10px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded px-2 py-1"
+            >
+              Clear cell selection
+            </button>
           )}
         </div>
 
         {/* ── Main content: map + side panel ─────────────────────────────── */}
         <div className="flex gap-5 items-start">
-
-          {/* Map container */}
+          {/* Map */}
           <div
             className="flex-1 min-w-0 border border-slate-200 rounded-xl overflow-hidden bg-slate-50"
             style={{ aspectRatio: '640 / 460' }}
@@ -193,11 +210,13 @@ export default function Page() {
               viewMode={viewMode}
               selectedRegionId={selectedRegionId}
               hoveredRegionId={hoveredRegionId}
+              selectedCellId={selectedCellId}
               onRegionClick={handleRegionClick}
               onRegionEnter={handleRegionEnter}
               onRegionLeave={handleRegionLeave}
               onCellEnter={handleCellEnter}
               onCellLeave={handleCellLeave}
+              onCellClick={handleMapCellClick}
             />
           </div>
 
@@ -208,13 +227,11 @@ export default function Page() {
                 <RegionSummaryCard region={selectedRegion} stats={selectedStats} />
               </div>
             ) : (
-              /* Empty state */
               <div className="border border-dashed border-slate-200 rounded-xl p-5 bg-slate-50 text-center">
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Select a region on the map to see its cell-level breakdown, predicted
-                  vulnerability distribution, and aggregation accuracy.
+                <p className="text-[11px] text-slate-400 leading-relaxed mb-4">
+                  Select a region to see cell breakdown, score distribution, and aggregation accuracy.
                 </p>
-                <div className="mt-4 space-y-2">
+                <div className="space-y-2">
                   {REGIONS.map(r => (
                     <button
                       key={r.id}
@@ -230,15 +247,76 @@ export default function Page() {
                 </div>
               </div>
             )}
+
+            {/* Selected cell mini-card */}
+            {selectedCell && (
+              <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
+                <p className="text-[9px] uppercase tracking-widest text-blue-400 mb-2">
+                  Selected cell
+                </p>
+                <p className="text-[11px] font-mono text-blue-700 font-semibold mb-2 truncate">
+                  {selectedCell.id}
+                </p>
+                <div className="space-y-1">
+                  {[
+                    ['Predicted poverty', `${(selectedCell.predictedPoverty * 100).toFixed(1)}%`],
+                    ['Settlement',        selectedCell.settlementType],
+                    ['Population',        selectedCell.population.toLocaleString()],
+                    ['Night lights',      `${selectedCell.nightLights}/100`],
+                    ['Bldg density',      `${(selectedCell.buildingDensity * 100).toFixed(0)}%`],
+                    ['Accessibility',     `${(selectedCell.accessibility  * 100).toFixed(0)}%`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-[10px] text-blue-500">{label}</span>
+                      <span className="text-[10px] font-mono text-blue-800 font-medium">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ── Aggregation panel (shows when region selected) ─────────────── */}
+        {/* ── Aggregation panel ──────────────────────────────────────────── */}
         {selectedRegion && selectedStats && (
           <div className="mt-5">
             <AggregationPanel region={selectedRegion} stats={selectedStats} />
           </div>
         )}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            CELL EXPLORER — table + insights
+        ══════════════════════════════════════════════════════════════════ */}
+        <div className="mt-8 border-t border-slate-100 pt-6">
+          <div className="flex items-baseline gap-3 mb-5">
+            <h2 className="text-sm font-semibold text-slate-800">Cell Explorer</h2>
+            <span className="text-[11px] text-slate-400">
+              {cells.length.toLocaleString()} cells at {resolution} resolution ·
+              click any row to select and highlight on the map
+            </span>
+          </div>
+
+          {/* Table + insights side by side on large screens */}
+          <div className="flex flex-col xl:flex-row gap-6 items-start">
+            {/* Table — takes ~60% */}
+            <div className="flex-1 min-w-0">
+              <CellTable
+                cells={cells}
+                selectedCellId={selectedCellId}
+                onCellSelect={handleTableCellSelect}
+              />
+            </div>
+
+            {/* Insights panel — 40% */}
+            <div className="xl:w-[400px] flex-shrink-0 w-full">
+              <CellInsightsPanel
+                cells={cells}
+                selectedCell={selectedCell}
+                selectedRegion={selectedRegion}
+              />
+            </div>
+          </div>
+        </div>
 
         {/* ── Steps explainer ────────────────────────────────────────────── */}
         <div className="mt-8 border-t border-slate-100 pt-6">
@@ -256,7 +334,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* ── Floating cell tooltip ───────────────────────────────────────── */}
+      {/* Floating cell tooltip */}
       {tooltip && tooltipRegion && (
         <CellTooltip
           cell={tooltip.cell}

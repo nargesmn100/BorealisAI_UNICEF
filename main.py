@@ -322,6 +322,15 @@ def phase_outputs(
     pred_table.to_csv(pred_csv, index=False)
     logger.info("Predictions saved to: %s  (%d rows)", pred_parquet, len(pred_table))
 
+    consolidated_path = os.path.join(tables_dir, f"{output_prefix}_full_consolidated.parquet")
+    df.to_parquet(consolidated_path, index=False)
+    logger.info(
+        "Full consolidated table (features + predictions): %s — %d rows × %d cols",
+        consolidated_path,
+        len(df),
+        len(df.columns),
+    )
+
     # ------------------------------------------------------------------
     # Evaluation report
     # ------------------------------------------------------------------
