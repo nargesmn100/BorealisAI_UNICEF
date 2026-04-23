@@ -1,0 +1,157 @@
+country:
+  code: NGA
+  name: Nigeria
+  output_prefix: nga
+evaluation:
+  hierarchical_cv:
+    enabled: false
+    experiments:
+    - eval_level: state
+      train_level: geopolitical_zone
+    - eval_level: state_urban_rural
+      train_level: geopolitical_zone
+    - eval_level: state_urban_rural
+      train_level: state
+    models:
+    - ridge
+    - gbm
+  metrics:
+  - mae
+  - rmse
+  - spearman_r
+  - pearson_r
+  - rank_correlation
+  priority_k:
+  - 10
+  - 25
+  - 50
+  - 100
+  two_level_cv:
+    enabled: false
+    max_folds: 10
+geo:
+  bbox:
+    east: 14.68
+    north: 13.87
+    south: 4.26
+    west: 2.67
+  crs: EPSG:4326
+  gadm_layer: ADM_ADM_1
+  population_imputation:
+    method: median_smod
+    min_value: 1.0
+  smod_urban_threshold: 21
+  subregion_strategy: admin_level1
+logging:
+  format: '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+  level: INFO
+modeling:
+  admin_zone_col: subregion
+  conformal:
+    cal_fraction: 0.2
+    coverage: 0.9
+  features:
+  - rwi
+  - population
+  - log_population
+  - smod_class
+  - is_urban
+  - travel_time_cities
+  - travel_time_50k
+  - log_travel_time_cities
+  - log_travel_time_50k
+  - nightlights
+  - log_nightlights
+  - building_density
+  - log_building_density
+  - dist_school_km
+  - dist_health_km
+  - conflict_events
+  - conflict_fatalities
+  - rainfall_mm
+  - ghsl_built_frac
+  - log_ghsl_built
+  - school_attendance_rate
+  - ever_attended_rate
+  - public_school_rate
+  - anc_rate
+  - skilled_delivery_rate
+  - facility_delivery_rate
+  - vacc_card_rate
+  - diarrhea_care_rate
+  - dhs_nearest_dep_index
+  - dist_km_nearest_dhs_cluster
+  gam:
+    clip_raw_max: 120.0
+    clip_raw_min: 0.0
+    lam_candidates:
+    - 0.001
+    - 0.01
+    - 0.1
+    - 1.0
+    - 10.0
+    - 100.0
+    max_iter: 100
+    n_splines: 10
+    random_state: 42
+  gbm:
+    colsample_bytree: 0.8
+    learning_rate: 0.05
+    max_depth: 4
+    n_estimators: 300
+    n_jobs: -1
+    random_state: 42
+    subsample: 0.8
+  primary_target: moderate_prevalence
+  ridge:
+    alpha_candidates:
+    - 0.01
+    - 0.1
+    - 1.0
+    - 10.0
+    - 100.0
+    - 1000.0
+    cv_folds: 5
+    dhs_soft_label_weight: 0.4
+    random_state: 42
+    use_dhs_soft_label: true
+  secondary_target: severe_prevalence
+  uncertainty:
+    n_bootstrap: 10
+    random_state: 42
+  weakly_supervised:
+    linear:
+      l2_reg: 1.0
+      random_state: 42
+    mlp:
+      hidden_size: 32
+      l2_reg: 0.01
+      max_iter: 3000
+      random_state: 42
+    n_importance_repeats: 30
+paths:
+  eval_dir: Data/outputs/nga/eval
+  gadm_file: Data/Nigeria/gadm41_NGA.gpkg
+  gadm_gpkg: Data/Nigeria/gadm41_NGA.gpkg
+  grid_file: Data/interim/nga/nga_base_grid.parquet
+  grid_with_admin_file: Data/interim/nga/nga_grid_admin.parquet
+  grid_with_proxies_file: Data/interim/nga/nga_grid_proxies.parquet
+  interim_dir: Data/interim/nga
+  maps_dir: Data/outputs/nga/maps
+  mics_data_dir: Data/Nigeria/Nigeria MICS6 SPSS Datasets
+  modeling_table_file: Data/interim/nga/nga_modeling_table.parquet
+  new_features_parquet: Data/Nigeria/features/nga_new_features.parquet
+  nightlights_raster: Data/Nigeria/features/nightlights/viirs_ntl_2019_nga.tif
+  outputs_dir: Data/outputs/nga
+  population_raster: Data/Nigeria/nga_ppp_2020_constrained.tif
+  raw_data_dir: Data/Nigeria
+  rwi_csv: Data/Nigeria/nga_relative_wealth_index.csv
+  tables_dir: Data/outputs/nga/tables
+  targets_file: Data/interim/nga/nga_targets.csv
+targets:
+  admin_zone_col: subregion
+  country_code: NGA
+  primary_target: moderate_prevalence
+  secondary_target: severe_prevalence
+  subregion_national: _T
+  target_source: mics_spss

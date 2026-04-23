@@ -61,7 +61,7 @@ These are large binary files excluded by `.gitignore`. You only need them if you
 | `Data/Nigeria/features/ghsl/*.tif` | 123 MB raster | [EU JRC](https://ghsl.jrc.ec.europa.eu/) — browser download |
 | `Data/Nigeria/features/nga_osm_buildings.parquet` | 166 MB | Derived from OSM — re-run `process_ghsl.py` |
 | `Data/Nigeria/Nigeria MICS6 SPSS Datasets/*.sav` | Licensed data | [UNICEF MICS](https://mics.unicef.org/surveys) — requires registration |
-| `NGA_2018_GHSP-W4_v03_M_SPSS/*.sav` | Licensed data | [World Bank Microdata](https://microdata.worldbank.org/) |
+| `Data/Nigeria/dhs/raw/NGA_2018_GHSP-W4_v03_M_SPSS/*.sav` | Licensed data | [World Bank Microdata](https://microdata.worldbank.org/) |
 
 > **Note:** If you run `--force-rerun` and are missing raw data files, the pipeline will error on that step. Without `--force-rerun`, it loads from cache and skips missing files gracefully.
 

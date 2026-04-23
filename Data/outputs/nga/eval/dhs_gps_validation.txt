@@ -1,0 +1,19 @@
+========================================================================
+DHS GPS — Cluster vs nearest-grid prediction validation
+Nigeria DHS 2018 clusters × MICS-reconciled model outputs
+========================================================================
+
+Valid DHS cluster points: 1382
+Mean distance from DHS point to grid cell centre: 1.02 km
+Median distance: 1.00 km
+
+DHS deprivation_index scaled ×100 to compare to model % on same visual scale.
+
+Ridge: Spearman ρ = +0.600  (p = 0.0000)
+Ridge: Pearson  r = +0.584  (p = 0.0000)
+Ridge: MAE      = 14.45 pp  (DHS index×100 vs Ridge %)
+RWI:   Spearman ρ = +0.542  (p = 0.0000)
+
+NOTE: DHS index ≠ MICS moderate prevalence — different constructs.
+      Positive correlation = spatial co-movement of model with survey misery.
+========================================================================
