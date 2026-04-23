@@ -22,8 +22,24 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
-KR_DIR = ROOT / "NGKR7BFL"
-HR_DIR = ROOT / "NGHR7BFL"
+_DHS_RAW_DIR = ROOT / "Data" / "Nigeria" / "dhs" / "raw"
+
+
+def _first_existing_dir(candidates: list[Path]) -> Path:
+    for p in candidates:
+        if p.is_dir():
+            return p
+    return candidates[0]
+
+
+KR_DIR = _first_existing_dir([
+    _DHS_RAW_DIR / "NGKR7BFL",
+    ROOT / "NGKR7BFL",
+])
+HR_DIR = _first_existing_dir([
+    _DHS_RAW_DIR / "NGHR7BFL",
+    ROOT / "NGHR7BFL",
+])
 OUT_DIR = ROOT / "Data/Nigeria/dhs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -298,7 +314,7 @@ def main():
              "vaccination_rate", "deprivation_index"]
         ].to_string(index=False))
     print(f"\nNote: {len(cluster_df)} DHS clusters keyed by cluster_id.")
-    print("With NGGE7BFL/NGGE7BFL.shp in the repo root, run:")
+    print("With NGGE7BFL/NGGE7BFL.shp in Data/Nigeria/dhs/raw (or repo root), run:")
     print("  python -m src.scripts.merge_dhs_gps")
     print("  python -m src.scripts.validate_predictions_vs_dhs_gps")
 

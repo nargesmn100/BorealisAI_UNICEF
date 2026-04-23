@@ -1,0 +1,7 @@
+zone,mics_moderate_pct,dhs_deprivation_index,dhs_stunting_pct,dhs_wasting_pct,dhs_unvaccinated_pct,dhs_open_defec_pct,dhs_no_safe_water_pct,mics_rank,dhs_rank,rank_diff
+North West,57.02,0.3484,11.2,17.5,88.1,12.9,44.4,1,3,2
+North East,56.35,0.359,8.9,14.6,82.3,24.3,49.4,2,1,1
+North Central,50.73,0.3544,5.0,9.6,74.9,49.9,37.7,3,2,1
+South South,32.02,0.2916,5.2,9.5,70.1,25.9,35.1,4,5,1
+South West,30.63,0.303,7.1,12.0,70.5,30.1,31.8,5,4,1
+South East,23.43,0.2545,5.1,8.8,66.0,26.2,21.2,6,6,0

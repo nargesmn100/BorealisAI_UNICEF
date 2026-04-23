@@ -1,0 +1,57 @@
+======================================================================
+DHS 2018  vs  MICS 2021 — Zone-Level Cross-Validation
+Nigeria, 6 Geopolitical Zones
+======================================================================
+
+Both surveys were conducted independently. Agreement validates the
+MICS-derived training targets used in the deprivation model.
+
+NOTE ON METRICS
+  MICS moderate: % children deprived in ≥2 of 6 dimensions (multidimensional)
+  DHS index:     composite of stunting, wasting, open defecation,
+                 unvaccination, unsafe water — higher = more deprived
+  They measure overlapping but not identical constructs. Rank order
+  agreement matters more than scale agreement.
+
+----------------------------------------------------------------------
+ZONE COMPARISON TABLE
+----------------------------------------------------------------------
+Zone              MICS Mod% MICS Rank  DHS Index  DHS Rank  |ΔRank|
+----------------------------------------------------------------------
+North West             57.0         1     0.3484         3        2  ⚠ 
+North East             56.4         2     0.3590         1        1    
+North Central          50.7         3     0.3544         2        1    
+South South            32.0         4     0.2916         5        1    
+South West             30.6         5     0.3030         4        1    
+South East             23.4         6     0.2545         6        0    
+
+----------------------------------------------------------------------
+STATISTICAL AGREEMENT
+----------------------------------------------------------------------
+  Spearman rank correlation (ρ): +0.771   p = 0.0724
+  Pearson correlation (r):       +0.961   p = 0.0023
+
+  Interpretation: MODERATE agreement — broadly consistent, minor zone-level discrepancies.
+
+----------------------------------------------------------------------
+DOMAIN-LEVEL BREAKDOWN BY ZONE (DHS)
+----------------------------------------------------------------------
+Zone              Stunting%  Wasting%   Unvacc%   OpenDef%   NoWater%
+----------------------------------------------------------------------
+North West             11.2      17.5      88.1       12.9       44.4
+North East              8.9      14.6      82.3       24.3       49.4
+North Central           5.0       9.6      74.9       49.9       37.7
+South South             5.2       9.5      70.1       25.9       35.1
+South West              7.1      12.0      70.5       30.1       31.8
+South East              5.1       8.8      66.0       26.2       21.2
+
+----------------------------------------------------------------------
+CONCLUSIONS
+----------------------------------------------------------------------
+  North-South gradient (MICS): North avg 54.7% vs South avg 28.7%
+  North-South gradient (DHS):  North avg 0.354 vs South avg 0.283
+  Both surveys confirm North is substantially more deprived than South.
+
+  Flagged zones (|rank diff| ≥ 2): North West
+
+======================================================================
