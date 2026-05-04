@@ -398,8 +398,10 @@ def aggregate_to_admin(
         else:
             subregion = str(int(state_code)) if pd.notna(state_code) else str(state_code)
 
-        # Normalize to title case so MICS "ABIA" matches GADM "Abia"
+        # Normalize: title-case so "ABIA" → "Abia" etc.
         subregion = subregion.strip().title()
+        # FCT: SPSS metadata often yields "Fct" via title(); keep as-is to match
+        # the harmonised GADM label (step03 maps "Federal Capital Territory" → "Fct").
 
         rows.append({
             "subregion": subregion,
@@ -685,5 +687,17 @@ def run_nigeria_targets(cfg: dict) -> pd.DataFrame:
                         level_name, level_path, len(level_df))
     except Exception as e:
         logger.warning("Could not compute multilevel targets: %s", e)
+
+    # Compute per-dimension targets (Kyriaki spec: shelter, sanitation, water,
+    # nutrition, education 5-14, education 15-17, health 12-35 months).
+    try:
+        from src.targets.dimension_targets import run_nigeria_dimension_targets
+        run_nigeria_dimension_targets(cfg)
+    except Exception as e:
+        logger.warning(
+            "Could not compute dimension targets (non-fatal): %s. "
+            "Run `python src/scripts/run_dimension_models.py` separately.",
+            e,
+        )
 
     return targets

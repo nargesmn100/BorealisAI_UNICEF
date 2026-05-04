@@ -3,6 +3,10 @@
 > **Research tool only. Outputs are NOT official poverty statistics.**
 > UNICEF × RBC Borealis AI collaboration.
 
+**Maintaining this file:** After any substantive code, config, data-pipeline, or evaluation change, update this document in the **same change** (do not leave it stale). At minimum: **§1** (feature counts / new datasets), **§6** Master checklist + **Full list of remaining open items** + **Summary** table, and **Completed since last update** when you ship something new. Prefer this file’s checklist over one-line summaries elsewhere (**C8**).
+
+**Dated snapshot (May 4, 2026):** one-page executive status → [`CURRENT_STATUS_MAY_4_2026.md`](CURRENT_STATUS_MAY_4_2026.md). Update or supersede that file when the repo crosses a major milestone.
+
 ---
 
 ## Table of Contents
@@ -12,7 +16,7 @@
 3. [Current Model Performance](#3-current-model-performance) — LOZO full results, permutation test, hierarchical validation
 4. [How to Test It](#4-how-to-test-it)
 5. [All Outputs](#5-all-outputs)
-6. [Next Steps](#6-next-steps)
+6. [Next Steps](#6-next-steps) — **remaining TODOs at a glance**, priorities, master checklist, **remaining open items (D2, M3, full backlog)**
 
 ---
 
@@ -41,7 +45,15 @@
 | MICS6 Health Utilization Indicators | MICS6 wm.sav + ch.sav | ANC rate, skilled delivery, facility delivery, vaccination card, diarrhea care — state × urban/rural |
 | GADM Admin Boundaries | GADM v4.1 | State (ADM1) + LGA (ADM2) polygons |
 
-**Total features in model: 28** *(updated Apr 21, 2026 — added 8 education + health utilization features from MICS6 microdata)*
+**Total features in model: 46** — `modeling.features` in `config/config_nga.yaml`: **30** pre-D1 columns (geospatial + MICS-derived survey aggregates, including **2** DHS nearest-cluster features) + **16** D1 (NBS MPI + NEMIS). See also `HIGH_LEVEL_MODEL_OVERVIEW.md`.
+
+**D1 external datasets now ingested (May 2026):**
+
+| Dataset | Source | Features added |
+|---|---|---|
+| NBS MPI Microdata (Household survey, ~53k HH) | National Bureau of Statistics Nigeria | 9 state-level features: floor quality, water access, toilet quality, open defecation, food insecurity (HFIAS), health facility distance |
+| NEMIS School Listings (4 xlsx: PRE-PRIMARY/PRIMARY/JSS/SSS, ~180k schools) | Federal Ministry of Education / NEMIS | 7 key features: primary school count, enrolment, pupil-per-school ratio, JSS/SSS counts, public % and rural % |
+| Mo Ibrahim IIAG 2024 | Mo Ibrahim Foundation | 7 governance scalars stored in modeling table (national-level, excluded from training — enable for multi-country models) |
 
 ---
 
@@ -77,24 +89,47 @@
 ```
 Data/outputs/nga/
 ├── tables/
-│   ├── nga_predictions.parquet          # 103,424 grid cells × all models
-│   ├── nga_predictions.csv              # same, human-readable
-│   └── nga_lga_predictions.csv          # 775 LGAs, population-weighted aggregates
+│   ├── nga_predictions.parquet             # 103,424 grid cells × all models + ridge_theme__* columns
+│   ├── nga_predictions.csv                 # same, human-readable
+│   ├── nga_prediction_breakdown.csv        # 103,049 rows — per-cell Ridge β·z, theme sums, raw values
+│   ├── nga_lga_predictions.csv             # 775 LGAs, pop-weighted aggregates + ridge_bdg__* + raw__*
+│   └── nga_full_consolidated.parquet       # features + predictions (one wide table)
 ├── maps/
-│   ├── nga_lga_predictions.geojson      # LGA polygons with deprivation estimates
-│   ├── nga_predictions.geojson          # Grid-point predictions
-│   ├── nga_predictions_map.html         # Interactive Folium map
-│   ├── nga_uncertainty_map.html         # Interactive CI-width map
-│   └── nga_lga_deprivation_map.png      # Static comparison map
+│   ├── nga_lga_predictions.geojson         # LGA polygons with deprivation + theme estimates
+│   ├── nga_predictions.geojson             # Grid-point predictions (GeoJSON)
+│   ├── nga_predictions_map.html            # Interactive Folium map (MarkerCluster, legend, explain popups)
+│   ├── nga_predictions_map_sample.html     # Stratified 5 k-cell sample (fast load, demo-safe)
+│   ├── nga_uncertainty_map.html            # Interactive CI-width map (legend, dynamic opacity)
+│   ├── nga_lga_deprivation_map.png         # Static comparison map
+│   └── nga_comparison_map.html            # 6-panel LGA comparison (MICS, Ridge, GAM, error, uncertainty, NBS + theme tooltip)
 └── eval/
-    ├── evaluation_summary.csv           # All methods × all metrics
-    ├── lozo_evaluation.csv              # LOZO results per state
-    ├── hierarchical_validation.csv      # Cross-level validation summary
-    ├── two_level_cv.csv                 # Two-level CV results
-    ├── gbm_feature_importances.csv      # GBM feature ranking
-    ├── significance_tests.csv           # Statistical p-values
-    └── admin_detail_{method}.csv        # Per-state breakdown per model
+    ├── evaluation_summary.csv              # All methods × all metrics
+    ├── lozo_evaluation.csv                 # LOZO results per state
+    ├── hierarchical_validation.csv         # Cross-level validation summary
+    ├── hierarchical_validation_detail.csv  # Per-group detail
+    ├── two_level_cv.csv                    # Two-level CV results
+    ├── gbm_feature_importances.csv         # GBM feature ranking
+    ├── significance_tests.csv              # Statistical p-values
+    ├── admin_detail_{method}.csv           # Per-state breakdown per model
+    ├── dhs_gps_validation.csv|txt          # DHS cluster vs nearest-grid Ridge/RWI
+    ├── dhs_soft_label_sweep.csv            # Ridge DHS soft-label weight sweep
+    ├── dhs_aux_stack_sweep.csv             # Ridge DHS stacked-aux scale sweep (M1)
+    └── ridge_feature_contribution_breakdown.csv  # global Ridge importance / correlation table
 ```
+
+**New scripts** (not called by `main.py`; run independently):
+
+| Script | Purpose |
+|---|---|
+| `src/scripts/build_explainability_map.py` | Theme-dominance Folium map (3 layers: dominant theme, direction, DHS contribution) |
+| `src/scripts/dhs_aux_sweep.py` | Sweep `dhs_aux_dhs_scale` values, compare DHS Spearman + LOZO MAE to soft-label baseline |
+| `src/scripts/build_comparison_map.py` | Rebuild `nga_comparison_map.html` (6-panel LGA map) |
+
+### Key docs in repo
+
+- `PROJECT_STATUS.md` — this file
+- `HIGH_LEVEL_MODEL_OVERVIEW.md` — features, data sources, metrics, MICS target definition, Ridge contribution notes
+- `Data/README.md` — data layout; DHS raw lives under `Data/Nigeria/dhs/raw/`
 
 ---
 
@@ -387,18 +422,69 @@ print(lga.sort_values('ridge_moderate', ascending=False).head(20))
 
 ### Open the interactive map
 
-Open in any browser:
+**Cell-level (dense points)** — use a modern desktop browser (files are multi‑MB HTML):
+
 ```
-Data/outputs/nga/maps/nga_predictions_map.html
+Data/outputs/nga/maps/nga_predictions_map.html        ← full 100 k cells (MarkerCluster on)
+Data/outputs/nga/maps/nga_predictions_map_sample.html ← ~5 k stratified sample (fast, demo-safe)
 ```
 
-### Load GeoJSON in QGIS or Kepler.gl
+Each **circle = one modelling grid cell** (point at cell centre). **Colour** shows predicted **moderate deprivation %** using the best-available model column in this order: GBM → GAM → Ridge → RWI. **Click** a marker for popup: subregion/state, RWI, population, **moderate poverty %**, and the Ridge linear **explain** block (top themes + top features).
+
+**What's new (May 2026):** Both maps now include:
+- **MarkerCluster** — markers cluster at low zoom levels; click a cluster to expand or zoom.
+- **Dynamic opacity/radius** — automatically reduced for high cell counts to reduce overplotting.
+- **Floating legend** — "how to read" box (top-left) explains colour scale and popup fields.
+- **Explain popups** — Ridge contribution breakdown (top themes + features) shown per cell.
+
+**Interpretation caveat:** At **whole-country zoom**, 10⁵ markers will still overlap even with clustering; that is expected. Use the **sample map** (`_sample.html`) or the **LGA polygon map** below for national-level presentations. The full map is best used zoomed into one state.
+
+**LGA polygons (recommended for national overview)**
+
+```
+Data/outputs/nga/maps/nga_comparison_map.html
+```
+
+Six layers (MICS, Ridge, GAM, error, uncertainty, NBS). Use layer control — hover polygons instead of inspecting every cell.
+
+**GeoJSON**
 
 ```
 Data/outputs/nga/maps/nga_lga_predictions.geojson
 ```
-Colour by `ridge_moderate` or `wsnn_moderate`. Use `mics_state_truth` column to compare.
 
+Colour in QGIS / Kepler by `ridge_moderate`; compare to `mics_state_truth`.
+
+### Kepler.gl recipe (GPU-accelerated; handles 100 k+ cells without lag)
+
+1. Open [kepler.gl/demo](https://kepler.gl/demo) in Chrome (or run locally: `pip install keplergl`).
+2. Drag `Data/outputs/nga/tables/nga_predictions.parquet` onto the browser canvas  
+   *(Parquet is natively supported since Kepler v2.5; alternatively use the CSV).*
+3. **Add layer → Point** → set lat/lon to `latitude` / `longitude`.
+4. **Colour by:** `ridge_moderate` — use a Sequential (yellow-orange-red) scale.  
+   To compare: duplicate the layer, colour second layer by `mics_state_truth`.
+5. **Filter** by `subregion` (state) to drill into one state at a time.
+6. **Tooltip** fields: `subregion`, `ridge_moderate`, `rwi`, `population`, `ridge_theme__wealth`, `ridge_theme__health_mics` (if breakdown was merged).
+7. Export → PNG or HTML snapshot for reports.
+
+For the breakdown layer: use `nga_prediction_breakdown.csv` (same workflow, colour by `ridge_theme__*` columns to see theme dominance).
+
+### Predictions-map UX — concerns & remediation backlog
+
+| Concern | What users see | Why |
+| :--- | :--- | :--- |
+| **Overplotting** | No fine structure nationally; tiring to explore | Same-size circles densely mask each other |
+| **“Solid” / black appearance** | Viewport lacks readable geography | Stacked translucent markers dominate or hide basemap; large inline HTML markers; screenshots don’t reproduce tiles |
+| **Equal visual weight per cell** | Hard to spotlight populous hotspots | Fixed radius ignores population |
+
+**Suggested next steps (solve in layers):**
+
+1. **Practice & comms:** Default stakeholder map → **LGA GeoJSON/comparison**, not cell Folium unless zoomed QA.
+2. **Code (`main.py` + YAML):** Optional `MarkerCluster` / FastMarkerCluster; reduce `fill_opacity` above `N_cells` threshold; optionally scale `radius` by `√population` (bounded).
+3. **Second export:** Coarse **heat/hex aggregation** Folium layer, or capped **sample cells** parquet → lighter demo HTML.
+4. **Heavy analysis:** Ship `nga_predictions.parquet` → Kepler.gl for filters/GPU rendering.
+
+*Full ID’d list of concerns and implementation TODOs: **§6 — Master checklist** (C1–C3, U1–U6).*
 ### Run evaluation reports
 
 ```python
@@ -447,6 +533,14 @@ python main.py --country nga --force-rerun --skip-gbm
 | `rwi_moderate` | RWI baseline |
 | `*_severe` | Same columns for severe deprivation threshold |
 | `*_depth` | Depth metric (intensity, not just headcount) |
+| `ridge_bdg_popup` | Pre-formatted HTML explain snippet (top themes + features) for Folium popups |
+| `ridge_theme__wealth` | Ridge β·z contribution sum for wealth theme |
+| `ridge_theme__urban_built` | Ridge β·z contribution sum for urban/built-environment theme |
+| `ridge_theme__access_services` | Ridge β·z contribution sum for service-access theme |
+| `ridge_theme__health_mics` | Ridge β·z contribution sum for MICS health-utilization theme |
+| `ridge_theme__edu_mics` | Ridge β·z contribution sum for MICS education theme |
+| `ridge_theme__climate_conflict` | Ridge β·z contribution sum for climate/conflict theme |
+| `ridge_theme__dhs_cluster` | Ridge β·z contribution sum for DHS nearest-cluster theme |
 
 ### LGA Table (`nga_lga_predictions.csv`) — 775 rows
 
@@ -460,12 +554,166 @@ python main.py --country nga --force-rerun --skip-gbm
 | `ridge_moderate` | Population-weighted mean Ridge prediction |
 | `wsnn_moderate` | Population-weighted mean WSNN prediction |
 | `gam_moderate` | Population-weighted mean GAM prediction |
+| `ridge_bdg__<feature>` | Pop-weighted mean per-feature Ridge β·z contribution (one column per feature) |
+| `raw__<feature>` | Pop-weighted mean raw feature value per LGA (one column per feature) |
+| `ridge_theme__*` | Pop-weighted mean theme contribution sums (7 themes; also in GeoJSON) |
 
 ---
 
 ## 6. Next Steps
 
-### ✅ Completed since last update (Apr 21, 2026)
+### Remaining TODOs (at a glance) — May 2026
+
+| Priority | ID | What is left |
+| :---: | :--- | :--- |
+| 1 | **D2** | Second-country smoke test — new `config_{iso}.yaml`, MICS + RWI + GADM + rasters, variable-mapping QA. |
+| 2 | **Validation** | Re-run `dhs_aux_sweep.py` **with full LOZO** (not `--skip-lozo`) to confirm `dhs_aux_dhs_scale=1.0` on held-out states; refresh eval CSVs. |
+| 3 | **U1** | Stakeholder adoption: default narrative = **LGA** maps / GeoJSON, not 100k-cell Folium (process / comms). |
+| 4 | **Optional** | **E5 GBM:** enable `export_gbm_shap`, document SHAP for stakeholders. **D1+:** LGA-level NEMIS/NBS harmonisation to GADM ADM2 for sub-state cell features (state join is done). **Nutrition:** HAZ-based target if a round with anthropometry is used. |
+| — | **M3** | Asymmetric LOZO loss — **paused** pending product/ethics sign-off. |
+| — | **C8** | Keep Summary / §1 counts aligned with this checklist after each release. |
+
+**D1 core ingestion:** ✅ done (`ingest_iiag.py`, `ingest_nbs_mpi.py`, `ingest_nemis.py`, `ingest_d1_features.py`; 16 new training features in `config_nga.yaml`). Re-run `python src/scripts/ingest_d1_features.py --country nga` after refreshing raw D1 files, then `python main.py --country nga` if you want full pipeline outputs regenerated with the new columns.
+
+---
+
+### Current repository status (review snapshot)
+
+- **Nigeria config:** `config/config_nga.yaml` — **46** predictor features in `modeling.features` (**30** pre-D1 + **16** D1; the 30 include **2** DHS nearest-cluster columns); Ridge **DHS stacked auxiliary** active (`dhs_aux_dhs_scale: 1.0`; soft-label blend off when that scale is positive — see `ridge` block in config); GAM **raw-score clipping** enabled; **map UX** flags (`use_folium_cluster`, `folium_cluster_threshold`, `folium_max_cells_full`, `folium_sample_cells`); **explainability** (`export_prediction_breakdown: true`). **IIAG** scalars (7) live in the modeling table for multi-country use but are **not** in the 46-feature training list (no within-Nigeria variation).
+- **Pipeline:** `main.py` runs data → baselines → models (Ridge / optional GAM, GBM, WSNN) → eval → outputs. Outputs now include Ridge breakdown CSV, MarkerClustered Folium maps with legends, sampled HTML export, and LGA full-contribution table. Cached intermediates under `Data/interim/nga/`; final artifacts under `Data/outputs/nga/`.
+- **DHS raw inputs:** prefer `Data/Nigeria/dhs/raw/` (`NGKR7BFL`, `NGHR7BFL`, `NGGE7BFL`, SPSS bundle); `process_dhs` / `merge_dhs_gps` resolve that path (legacy repo-root folders still work if present).
+- **Docs:** `HIGH_LEVEL_MODEL_OVERVIEW.md` (Ridge linear decomposition formula, soft-label vs stacked-aux explanation, breakdown schema), `Data/README.md`; feature contribution table: `Data/outputs/nga/eval/ridge_feature_contribution_breakdown.csv`.
+- **Resolved gaps:** FCT/`Fct` harmonization done (`step03_assign_admin.py` `_SUBREGION_HARMONISE`); `pytest` default-config path fixed; all Folium UX improvements implemented; `--force-rerun` from scratch may still require all geospatial zips in config (e.g. `smod_zip`) on the machine.
+- **Paused (product decision):** asymmetric loss / “never under-predict” policy for held-out LOZO — not implemented yet.
+
+---
+
+### Master checklist — open concerns & TODOs
+
+Single working list for **concerns** (risks, misunderstood UI) and **TODOs** raised in review, map UX discussion, screenshot feedback, and earlier backlog text. Detail: **§4** (how to read maps), **Priorities 1–6** below, and **§ Remaining open items** (definitions + consolidated backlog).
+
+#### A. Concerns (not all need code)
+
+| ID | Concern | Notes / likely cause |
+| :--- | :--- | :--- |
+| **C1** | Cell Folium map **unreadable at national zoom** | ~10⁵ overlapping markers. *Mitigated*: MarkerCluster + dynamic opacity + sample map (`_sample.html`) now generated; use LGA map for national overview. |
+| **C2** | Viewport looks **solid dark or "black"** (including screenshots) | Usually **overplotting** hiding basemap; less often blocked tiles (offline/VPN), OOM on huge HTML, or `file://` limits. **Mitigation:** use `_sample.html` or **`nga_comparison_map.html`**; serve via `python -m http.server` if needed. |
+| **C3** | **No map visible** / empty viewer | Wrong file, incomplete copy, tab crash, or wait for render. Verify file size and pipeline completed `phase_outputs`. |
+| **C4** | **Explain block missing** in popups | Stale HTML from before breakdown merge; rerun full pipeline; confirm `nga_prediction_breakdown.csv` exists. |
+| **C5** | **GAM** generalisation failure | LOZO can diverge — do not rely on GAM for final national maps without more work (narrative elsewhere). |
+| **C6** | **FCT vs `Fct`** | ✅ **Resolved** — `step03_assign_admin.py` `_SUBREGION_HARMONISE` normalises both names. |
+| **C7** | **Default `pytest`** without `config/config.yaml` | ✅ **Resolved** — `tests/test_config.py` now falls back to `config_nga.yaml` or any `config_*.yaml`. |
+| **C8** | **End-of-section Summary table** may lag code | Prefer this checklist over one-line Summary rows. |
+
+#### B. Modeling / training TODOs
+
+| ID | Task | Status |
+| :--- | :--- | :--- |
+| **M1** | **DHS aux stack sweep** | ✅ Ran sweep (May 2026): scale=1.0 is best (Spearman 0.553 vs 0.486 for soft-label). Config updated: `dhs_aux_dhs_scale: 1.0` |
+| **M2** | Document soft-label vs aux-stack | ✅ YAML inline + `HIGH_LEVEL_MODEL_OVERVIEW.md §3` |
+| **M3** | **Asymmetric LOZO loss** | **Paused** (product decision) — see **§ Remaining open items — M3** |
+| **M4** | **FCT/`Fct`** harmonization | ✅ `step03_assign_admin.py` `_SUBREGION_HARMONISE`; `compute_mics_deprivation.py` note |
+
+#### C. Explainability / outputs TODOs
+
+| ID | Task | Status |
+| :--- | :--- | :--- |
+| **E1** | `nga_prediction_breakdown.csv` + merge to **`nga_predictions.*`** | Done |
+| **E2** | Ridge explain in **Folium** + **comparison map** theme hints | Done |
+| **E3** | **Explainability-first** map (colour by dominant theme, filters) | ✅ `src/scripts/build_explainability_map.py` — 3 Folium layers (theme, direction, DHS) |
+| **E4** | **LGA** full per-feature contribution table | ✅ `lga_aggregation.py` — `ridge_bdg__*` + `raw__*` pop-weighted means in CSV |
+| **E5** | **SHAP / Permutation importance** GBM/WSNN | ✅ WSNN permutation importance implemented in `weakly_supervised_nn.py` → `nga_wsnn_importance.csv` |
+| **E6** | **HIGH_LEVEL_MODEL_OVERVIEW**: Ridge linear vs reconciled | ✅ §8 formula + `nga_prediction_breakdown.csv` schema table added |
+
+#### D. Map / UI TODOs
+
+| ID | Task | Status |
+| :--- | :--- | :--- |
+| **U1** | Process: default **stakeholder** view = **LGA** comparison / GeoJSON | **Open** — process / comms adoption (not a code blocker) |
+| **U2** | `main.py`: optional **MarkerCluster** (YAML flag) | ✅ Done |
+| **U3** | `main.py`: **opacity / radius** rules for high cell counts | ✅ Done |
+| **U4** | **Sample** or **hex-binned** Folium export | ✅ Done |
+| **U5** | Floating **“how to read”** legend on Folium | ✅ Done |
+| **U6** | **Kepler.gl** minimal recipe for `nga_predictions.parquet` | ✅ Done |
+
+#### E. Data / expansion TODOs
+
+| ID | Task | Status |
+| :--- | :--- | :--- |
+| **D1** | EMIS / governance / NBS LGA (Priority 2) | **✅ Implemented (May 4, 2026)** — see §6 and ingestion scripts |
+| **D2** | Second country smoke test (Priority 4) | **Open** — template ready; see **§ Remaining open items — D2** |
+
+---
+
+### Remaining open items — what they mean (D1, D2, M3) + full backlog
+
+This subsection ties the **master checklist IDs** to plain-language explanations so stakeholders know *why* something is open and *what* would unblock it.
+
+#### **D1 — EMIS / governance / NBS LGA features**
+
+**What it is:** Extra predictors beyond MICS survey aggregates — especially **school-system quality** (EMIS), **governance** proxies, and **official LGA poverty** where available.
+
+- **EMIS (Education Management Information System):** administrative data from the **Federal Ministry of Education** (and state ministries) on schools, enrolment, completion, teacher ratios, infrastructure, etc. The pipeline already uses **MICS-derived** attendance and proximity (`school_attendance_rate`, `dist_school_km`, …). EMIS would add **LGA-level quality and capacity** signals that surveys do not fully capture.
+- **Governance:** e.g. Mo Ibrahim Index subnational scores or similar — optional enrichment for “institutional capacity” at subnational scale.
+- **NBS LGA poverty:** National Bureau of Statistics **LGA identifiers and poverty estimates** (often on request) — would allow **LGA-level validation** of maps, not only state-level MICS reconciliation.
+
+**Local acquisition log (May 2026):** see **`Data/Nigeria/d1_external/README.md`**. Summary:
+
+| Source | Status | Notes |
+| :--- | :--- | :--- |
+| **NEMIS** school listings (`PRE-PRIMARY`, `PRIMARY`, `JSS`, `SSS` `.xlsx`) | Downloaded to `Data/Nigeria/d1_external/nemis/` | **State-level ingestion ✅** (`ingest_nemis.py` → `nga_nemis_state.csv`, merged via `subregion`). **Optional follow-up:** LGA string harmonisation to **GADM ADM2** for true LGA-level cell features (not yet wired). Re-download: `curl -skL` if needed (TLS may require `-k`). |
+| **World Bank** national series | `governance/worldbank_nga_primary_enrollment.json` | Country-level only; API, no login. |
+| **Mo Ibrahim IIAG** | **On repo:** `2024-IIAG-scores.xlsx` | **Country × year** governance scores (not LGA). Correct IIAG product for D1 “governance” national layer. |
+| **NBS MPI microdata** | **On repo:** `Nigeria Multidimensional Poverty Index Survey/*.dta` | **State-level ingestion ✅** (`ingest_nbs_mpi.py` → weighted prevalences by `a1`, joined as `subregion`). **Optional follow-up:** aggregate by `a2` (LGA code) + harmonise to GADM ADM2 for sub-state validation maps. |
+
+Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unless you remove that rule for Git LFS.
+
+**✅ Fully implemented (May 4, 2026):**
+- `src/scripts/ingest_nemis.py` — reads all 4 NEMIS xlsx files, aggregates to state level (count, enrolment, pupil-per-school, public%, rural%), handles missing states with NaN
+- `src/scripts/ingest_nbs_mpi.py` — reads Sections A/E/F/I/J from NBS MPI .dta files, computes household-weighted state-level prevalences for 9 WASH/housing/food/health indicators
+- `src/scripts/ingest_iiag.py` — extracts 7 governance indicators for Nigeria 2023 from IIAG xlsx
+- `src/scripts/ingest_d1_features.py` — orchestrator: calls all three, joins to modeling table, saves `Data/Nigeria/d1_external/nga_d1_features.parquet`
+- `config/config_nga.yaml` — 16 new features added under `modeling.features`; per-dimension `feature_overrides` updated with domain-matched D1 subsets
+- NBS features (100% state coverage, 0 NaN) improve WASH dimensions; NEMIS (87% state coverage) improves education models (edu_5_14 R=0.985, edu_15_17 R=0.973)
+
+---
+
+#### **D2 — Second country smoke test**
+
+**What it is:** Prove the pipeline is **config-driven**, not Nigeria-specific: copy `config/config_nga.yaml` → `config/config_{iso}.yaml`, point `paths` at another country’s **RWI, GADM, population raster, MICS SPSS**, adjust bbox and admin layer names, then run `python main.py --country {code}` end-to-end.
+
+**Why it is open:** The **code template and config pattern** are ready; each new country still needs **downloaded inputs** (MICS round may use different variable names — `compute_mics_deprivation.py` has Nigeria vs generic branches) and a short **QA pass** (admin spelling, CRS, missing rasters).
+
+**Blockers:** Time to select a pilot country + obtain files; possible **MICS column mapping** work if not Nigeria-style.
+
+---
+
+#### **M3 — Asymmetric LOZO loss** *(paused)*
+
+**What it is:** Today’s training uses **symmetric** squared error: over- and under-predicting a held-out state are penalised the same. **Asymmetric** loss would penalise **under-prediction** of deprivation more (or more than over-prediction) so that LOZO errors skew toward “safer” over-estimates for policy-facing use cases.
+
+**Why it is paused:** This is a **product and ethics** decision (communicating conservative vs unbiased estimates), not only an engineering change. Implementing it touches the Ridge / CV objective and reporting; it should align with UNICEF guidance on **presenting uncertainty** and **not hiding** underestimation risk.
+
+**Next steps if approved:** specify asymmetric weights or pinball loss quantile, implement in `ridge_model.py` (and eval), re-run LOZO and DHS validation, update narrative in maps and reports.
+
+---
+
+#### Full list of remaining open / follow-up items (May 2026)
+
+| ID / item | Type | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| **D1** | Data / features | **✅ Done** | NEMIS (33 states × 24 features), NBS MPI (37 states × 9 features), IIAG (7 national scalars) — all merged into modeling table. 16 new features active in `config_nga.yaml`. |
+| **D2** | Expansion | **Open** | Second-country smoke test — needs MICS + geo stack for chosen country (see above). |
+| **M3** | Modeling / policy | **Paused** | Asymmetric LOZO loss — product decision (see above). |
+| **U1** | Process / UX | **Open** | Default stakeholder view = **LGA** maps / GeoJSON (`nga_lga_predictions.*`, `nga_comparison_map.html`) rather than national cell Folium; adoption in decks and SOPs. |
+| **C8** | Documentation hygiene | **Open** | Summary tables can lag code; this file’s **Master checklist** and **Full list** below are the source of truth — refresh Summary rows after large releases. |
+| **C1–C5** | Concerns | **Mitigated / residual** | Cell-map density, black blob, empty viewer, popup explain, GAM LOZO — mitigations documented in §4 and checklist; GAM still not recommended for primary national map without further work (**C5**). |
+| **E5 (GBM)** | Explainability | **Optional follow-up** | **WSNN:** permutation importance implemented → `nga_wsnn_importance.csv`. **GBM:** SHAP sample path exists behind `export_gbm_shap` in config; widen use / document if stakeholders need GBM-specific SHAP at scale. |
+| **Nutrition (HAZ)** | Data limitation | **Open** | Nigeria MICS6 SPSS lacks HAZ; dimension nutrition uses **MDD proxy** until anthropometry z-scores are computed or a round with HAZ is used. |
+| **DHS aux-stack vs LOZO** | Validation | **Follow-up** | Sweep used `--skip-lozo`; re-run `dhs_aux_sweep.py` **with** LOZO when runtime allows to confirm scale=1.0 does not harm held-out states. |
+| **Priority 6** | Narrative / future | **Incremental** | DHS GPS cluster features are already in the pipeline; “full point-level training paradigm” remains a **roadmap** item for heavier cluster-level supervision (see Priority 6 section). |
+
+### ✅ Completed since last update (May 3–4, 2026)
 
 | Item | Status |
 |---|---|
@@ -478,34 +726,66 @@ python main.py --country nga --force-rerun --skip-gbm
 | NBS vs MICS cross-validation | ✅ Spearman ρ=0.64 — moderate agreement (different poverty concepts) |
 | MICS6 school attendance features | ✅ 37 states × urban/rural extracted from hl.sav — 3 new model features |
 | MICS6 health utilization features | ✅ 37 states × urban/rural extracted from wm.sav + ch.sav — 5 new model features |
-| Pipeline rebuilt with 28 features | ✅ Modeling table rebuilt; all features confirmed joined (103,424/103,424 cells) |
+| Pipeline rebuilt with 28+2 features | ✅ Modeling table: base 28 + 2 DHS nearest-cluster; 103,424/103,424 cells |
 | Interactive 6-panel comparison map | ✅ `Data/outputs/nga/maps/nga_comparison_map.html` — MICS truth, Ridge, GAM, error, uncertainty, NBS |
 | DHS nearest-cluster engineered features | ✅ Added to modeling table (`dhs_nearest_dep_index`, `dist_km_nearest_dhs_cluster`) and included in `config_nga.yaml` |
 | Ridge DHS soft-label sweep | ✅ Tested weights 0.1/0.2/0.3/0.4; best external fit at `dhs_soft_label_weight=0.4` (Spearman ρ=0.600, MAE=14.45 pp vs DHS index×100) |
+| DHS + LSMS raw folders organized | ✅ `Data/Nigeria/dhs/raw/`; scripts updated to find flat files and shapefile |
+| High-level + data layout docs | ✅ `HIGH_LEVEL_MODEL_OVERVIEW.md`, `Data/README.md` |
+| Ridge global contribution / correlation table | ✅ `Data/outputs/nga/eval/ridge_feature_contribution_breakdown.csv` |
+| Ridge per-cell breakdown CSV + Folium popups + `ridge_theme__*` LGA merge + comparison-map tooltips | ✅ `prediction_breakdown.py`, `main.py`, `lga_aggregation.py`, `build_comparison_map.py` |
+| DHS stacked auxiliary Ridge training option | ✅ `dhs_aux_mics_scale` / `dhs_aux_dhs_scale` in `ridge_model.py` + `config_nga.yaml` (tuning TBD — see **Master checklist M1**) |
+| FCT/`Fct` admin label harmonization | ✅ `step03_assign_admin.py` `_SUBREGION_HARMONISE`; all cells now matched |
+| `pytest` default-config path fix | ✅ `tests/test_config.py` falls back to `config_nga.yaml` or any `config_*.yaml` |
+| **Folium MarkerCluster** (YAML flag `use_folium_cluster`) | ✅ `main.py` + `config_nga.yaml` — clusters at low zoom, configurable threshold |
+| **Folium dynamic opacity / radius scaling** | ✅ Auto-lowers `fill_opacity` and marker `radius` when `n_cells > folium_cluster_threshold` |
+| **Folium stratified sample export** (`nga_predictions_map_sample.html`) | ✅ ~5 k cells stratified by state; fast-load demo-safe map |
+| **Floating "how-to-read" legend** on Folium maps | ✅ Both predictions and uncertainty maps now include a legend pane |
+| **Explainability-first map** (`build_explainability_map.py`) | ✅ 3 Folium layers: dominant Ridge theme, contribution direction, DHS cluster contribution |
+| **LGA full per-feature contribution table** | ✅ `lga_aggregation.py` writes `ridge_bdg__*` + `raw__*` pop-weighted means to LGA CSV |
+| **DHS aux-stack sweep script** (`dhs_aux_sweep.py`) | ✅ Sweeps `dhs_aux_dhs_scale` values, outputs `dhs_aux_stack_sweep.csv` |
+| **Kepler.gl recipe** in §4 How-To | ✅ Step-by-step guide for GPU-accelerated map exploration |
+| **`HIGH_LEVEL_MODEL_OVERVIEW.md`**: Ridge linear decomposition vs reconciled note | ✅ §8 formula + `nga_prediction_breakdown.csv` schema table added |
+| **Full pipeline run verified** (May 3, 2026) | ✅ exit_code=0; all 37 states reconciled; 103,049-row breakdown; 775/775 LGAs matched |
+| **Per-dimension targets** (Kyriaki spec, May 4, 2026) | ✅ `src/targets/dimension_targets.py` — 7 dimensions × 37 states from ch.sav + hh.sav + hl.sav |
+| **Per-dimension Ridge models** (May 4, 2026) | ✅ `src/scripts/run_dimension_models.py` — reconciled predictions for all 103,424 cells × 7 dimensions |
+| **`nga_dimension_targets.csv`** | ✅ 37 states × 22 columns (moderate + severe + n per dimension) |
+| **`nga_dimension_predictions.csv`** | ✅ 103,424 rows × 11 columns (7 `{dim}_moderate` prediction columns) |
+| **LGA dimension rollup** | ✅ `lga_aggregation.py` merges dimension predictions → `nga_lga_predictions.csv` + GeoJSON (775 LGAs) |
+| **7-panel dimension comparison map** | ✅ `src/scripts/build_dimension_map.py` → `nga_dimension_comparison_map.html` (Leaflet, LGA polygons, all 8 panels) |
+| **D1 external feature ingestion — NEMIS** (May 4, 2026) | ✅ `src/scripts/ingest_nemis.py` → 33 states × 24 school-system features; aggregated from ~180k school records across 4 levels (PRE/PRIMARY/JSS/SSS) |
+| **D1 external feature ingestion — NBS MPI** (May 4, 2026) | ✅ `src/scripts/ingest_nbs_mpi.py` → 37 states × 9 WASH/housing/food/health features; weighted from ~53k households (Sections A, E, F, I, J) |
+| **D1 external feature ingestion — IIAG** (May 4, 2026) | ✅ `src/scripts/ingest_iiag.py` → 7 governance scalars for Nigeria 2023; stored in modeling table (use for multi-country extension) |
+| **D1 orchestrator + modeling table update** (May 4, 2026) | ✅ `src/scripts/ingest_d1_features.py` → 40 D1 columns merged into `nga_modeling_table.parquet` (103,424 cells × 88 cols); 16 new features added to `config_nga.yaml` |
+| **Dimension models retrained with D1 features** (May 4, 2026) | ✅ edu_5_14 R=0.985, edu_15_17 R=0.973, health R=0.816, shelter R=0.706, sanitation R=0.709 with NBS/NEMIS feature overrides |
+| **DHS aux-stack sweep run** | ✅ `dhs_aux_sweep.py` → scale=1.0 best; config updated to `dhs_aux_dhs_scale: 1.0` |
+| **WSNN permutation importance (E5)** | ✅ `weakly_supervised_nn.py` `_wsnn_permutation_importance()` → `nga_wsnn_importance.csv` on next run |
+| **Dimension-specific feature sets** | ✅ Per-dimension feature overrides in `config_nga.yaml` `dimensions.feature_overrides` (13–15 features each) |
+| **`PROJECT_STATUS.md` hygiene** (May 4, 2026) | ✅ **Maintaining this file** callout at top; **§6 Remaining TODOs (at a glance)**; repository snapshot + Summary + Priority 2 aligned with 46 features and D1 done; DHS config bullets corrected for stacked aux |
 
 ---
 
-### Current Metrics Snapshot (latest run)
+### Current Metrics Snapshot (latest run — May 4, 2026)
+
 
 #### Held-out region generalization (LOZO, Ridge, pre-reconciliation on held-out state)
 
-- Mean absolute error (MAE): **11.98 pp**
-- Pearson correlation (target vs predicted aggregate): **0.495**
-- Spearman rank correlation: **0.636**
-- Hardest held-out states: **Nasarawa (+74.5 pp overpredict)**, **Jigawa (-37.9 pp underpredict)**, **Kaduna (+28.4 pp overpredict)**
-
+- Mean absolute error (MAE): **11.84 pp** (geopolitical-zone → state cross-validation, Ridge raw)
+- Pearson correlation (predicted vs truth, cross-level): **0.534**
+- Spearman rank correlation: **0.463**
+- Hardest held-out states: **Nasarawa (+40.6 pp overpredict)**, **Ogun (-13.0 pp)**, **Osun (-12.0 pp)**
 #### DHS GPS external validation (1,382 clusters, nearest-grid comparison)
 
 - Mean distance DHS point -> nearest grid cell centre: **1.02 km** (median 1.00 km)
-- Ridge Spearman ρ: **0.600** (p < 0.0001)
-- Ridge Pearson r: **0.584** (p < 0.0001)
-- Ridge MAE: **14.45 pp** (DHS deprivation index ×100 vs Ridge moderate %)
+- Ridge Spearman ρ: **0.553** (DHS stacked aux at scale=1.0; previously 0.486 with soft-label)
+- Ridge MAE: **17.67 pp** (DHS deprivation index ×100 vs Ridge moderate %)
 - RWI baseline Spearman ρ: **0.542**
+- Note: the scale of DHS dep index differs from MICS moderate %; MAE is cross-metric.
 
 #### Current selected configuration
 
-- `use_dhs_soft_label: true`
-- `dhs_soft_label_weight: 0.4` (best among 0.1/0.2/0.3/0.4 on DHS external fit)
+- `dhs_aux_dhs_scale: 1.0` / `dhs_aux_mics_scale: 1.0` — **stacked DHS auxiliary Ridge training** (see `ridge_model.py`; soft-label blend is inactive for training while the DHS auxiliary scale is positive).
+- `use_dhs_soft_label: true` / `dhs_soft_label_weight: 0.4` — kept in config for reference; **not** used for training while stacked aux is on (see `config_nga.yaml` comments).
 
 ---
 
@@ -548,9 +828,10 @@ This does not prove cell-level accuracy — but it provides more evidence that t
 DHS Household and Kids Recode flat files are already processed (`process_dhs.py` done).
 Cluster-level deprivation is keyed by `cluster_id` in `Data/Nigeria/dhs/nga_dhs_cluster_deprivation.csv`.
 
-GPS shapefile is now integrated from:
+GPS shapefile is read from (first match wins):
 ```
-Data/Nigeria/dhs/NGGE7BFL.shp   # (or NGGE7BFL.DTA)
+Data/Nigeria/dhs/raw/NGGE7BFL/NGGE7BFL.shp
+# legacy fallbacks: repo root NGGE7BFL/ or Data/Nigeria/dhs/NGGE7BFL.shp
 ```
 
 Re-run training/evaluation:
@@ -563,33 +844,36 @@ python -m src.scripts.validate_predictions_vs_dhs_gps
 
 ### Priority 2 — School Quality / Governance Features
 
-School attendance and health utilization (from MICS6 microdata) are now in the model. Remaining high-value features:
+MICS6 attendance and health utilisation are in the model. **State-level D1 ingestion is done** (May 2026): NEMIS school listings, NBS MPI WASH/housing/food/health survey aggregates, IIAG national scalars on the grid — see **§1** and `src/scripts/ingest_d1_features.py`.
 
 | Dataset | Source | Status |
 |---|---|---|
-| Nigeria EMIS school completion rates by LGA | Federal Ministry of Education | Request needed — would give LGA-level quality |
-| Subnational governance indicators | Mo Ibrahim Foundation | Partially free — would capture local governance capacity |
-| NBS LGA-level poverty p-codes | NBS Nigeria | Available on request |
+| NEMIS enrolment / school counts (state join) | Federal Ministry of Education | ✅ In `modeling.features` (subset of 16 D1 columns) |
+| NBS MPI household survey (state join) | NBS Nigeria | ✅ In `modeling.features` (9 weighted state prevalences) |
+| Mo Ibrahim IIAG (national) | Mo Ibrahim Foundation | ✅ In modeling table; **not** in Ridge feature list (constant across Nigeria) |
+| EMIS **completion / repetition / class size** by LGA | States / FME | Not in NEMIS xlsx extracts — **future** if tabular product is obtained |
+| Subnational governance (state/LGA index) | Various | **Future** — IIAG remains country-level only |
+| NBS **official LGA poverty** tables (p-codes aligned to GADM) | NBS Nigeria | **Future** — would unlock LGA-level **validation** of maps (MPI microdata already gives LGA codes `a2` for optional harmonisation work) |
 
 ---
 
 ### Priority 3 — Poverty Score Breakdown / Explainability
 
-Need a decomposition layer so each predicted poverty score is not just a single number, but a transparent breakdown of "what drove it."
+**Done (research pipeline):**
 
-Target output for each geography (cell/LGA/state):
+- **`Data/outputs/nga/tables/nga_prediction_breakdown.csv`** — per-cell Ridge β·z, themes, raw values; merged into **`nga_predictions.*`** via `ridge_bdg_popup` + **`ridge_theme__*`** columns.
+- **Folium** — cell map popups show Ridge linear **explain** snippet when exported.
+- **`nga_comparison_map.html`** — Ridge LGA tooltip appends population-weighted **theme** line where columns exist (`src/scripts/build_comparison_map.py`).
+- Ridge global table: **`eval/ridge_feature_contribution_breakdown.csv`** (coef-level, not geographic).
 
-- Predicted poverty score (e.g., 69%)
-- Contribution by major feature groups (wealth, access, built environment, education, health utilization, conflict, climate, DHS proximity)
-- Raw feature values used for that location (not just contributions)
-- Direction of effect (+ pushes poverty up, - pushes it down)
-- Optional uncertainty/confidence flag for the decomposition
+Still **open**:
 
-Planned artifacts:
+- ✅ **Explainability-first map** — done: `src/scripts/build_explainability_map.py` (3-layer Folium: dominant theme, direction, DHS contribution).
+- ✅ **LGA full per-feature rollup** — done: `lga_aggregation.py` writes `ridge_bdg__*` + `raw__*` pop-weighted means.
+- **GBM SHAP** (optional, `export_gbm_shap` in `config_nga.yaml`) — GBM path in `gbm_model.py`; enable when stakeholders need sampled SHAP at cell level.
+- **WSNN explainability** — ✅ permutation importance after WSNN fit → `nga_wsnn_importance.csv` (`weakly_supervised_nn.py`).
 
-- `Data/outputs/nga/tables/nga_prediction_breakdown.csv`
-- Explainability panel in map tooltip / dashboard
-- Method notes documenting how contributions are computed (Ridge coefficients first; later SHAP for GBM/WSNN)
+For **crowded Folium readability**: MarkerCluster, dynamic opacity/radius, sampled export, and floating legend are all now implemented — see **§4** "Predictions-map UX" and **§6 Master checklist** (UI tasks **U2–U6** ✅ all done).
 
 ---
 
@@ -609,7 +893,62 @@ Countries with MICS6 data available: ~60 countries. RWI covers ~100 low/middle-i
 
 ---
 
-### Priority 5 — DHS Point-Level Training *(after DHS arrives)*
+### Priority 5 — Per-Dimension Deprivation Targets ✅ Implemented (May 2026)
+
+**Request from Kyriaki (May 3, 2026):** Instead of training on the composite "≥2 of 6 dimensions" aggregate, define and predict each deprivation dimension individually using exact MICS variable definitions.
+
+#### Dimension specifications (Kyriaki)
+
+| Dimension | Age / Unit | MICS source | Moderate threshold | Severe threshold |
+|---|---|---|---|---|
+| **Shelter** | children < 17 | `hh.sav` (HC3 sleeping rooms + hl.sav household size) | ≥ 3 persons/room | ≥ 5 persons/room |
+| **Sanitation** | children < 17 | `hh.sav` WASH (WS11 toilet type, WS14 location) | improved but shared (WS14 = elsewhere) | unimproved / no facility |
+| **Water** | children < 17 | `hh.sav` WASH (WS1 source, WS4 travel time) | improved but > 30 min roundtrip | unimproved / surface / no facility |
+| **Nutrition** | children < 5 | `ch.sav` (HAZ z-score) | HAZ < −2 | HAZ < −3 |
+| **Education 5–14** | children 5–14 | `hl.sav` (ED10A current level, ED4 ever attended) | not currently attending | never attended |
+| **Education 15–17** | youth 15–17 | `hl.sav` (ED5A highest level, ED10A current) | not in secondary, no secondary completion | no primary completion |
+| **Health** | children 12–35 months | `ch.sav` (IM20/21 Pentavalent, IM26 measles) | missing ≥ 1 of DPT1/2/3 + measles | never vaccinated (IM11 = 2) |
+
+**Nigeria MICS6 data limitation — Nutrition:** HAZ anthropometric z-scores are **not available** in Nigeria MICS6 SPSS files. The Minimum Dietary Diversity (MDD) proxy (food group count from BD8 columns) is used instead. HAZ module would require separate WHO Anthro computation from raw height/weight measurements.
+
+#### What was built
+
+| Artifact | Description |
+|---|---|
+| `src/targets/dimension_targets.py` | Computes all 7 dimension flags per child/member, aggregates to 37 state-level targets → `nga_dimension_targets.csv` |
+| `src/scripts/run_dimension_models.py` | Trains Ridge per dimension, reconciles to state targets, produces `nga_dimension_predictions.csv` + per-dim Folium maps |
+| `Data/interim/nga/nga_dimension_targets.csv` | 37 states × 22 columns (moderate + severe + n per dimension) |
+| `Data/outputs/nga/tables/nga_dimension_predictions.csv` | 103,424 cells × 11 columns (7 `{dim}_moderate` predictions) |
+| `Data/outputs/nga/eval/nga_dimension_summary.csv` | Per-dimension Ridge alpha, train correlation |
+
+#### How to run
+
+```bash
+# Compute dimension targets + train all 7 dimension models (maps off for speed)
+python src/scripts/run_dimension_models.py --country nga --no-maps
+
+# Run only selected dimensions
+python src/scripts/run_dimension_models.py --country nga --dims shelter edu_5_14 health
+
+# Force recompute MICS targets from SPSS (after MICS file update)
+python src/scripts/run_dimension_models.py --country nga --recompute-targets
+```
+
+#### Dimension prevalence — Nigeria national averages (May 2026 run)
+
+| Dimension | National moderate % | Range across states |
+|---|---|---|
+| Shelter (overcrowding) | 54.6% | 35.6 – 77.2% |
+| Sanitation (improved+shared) | 2.3% | 0.0 – 7.5% |
+| Water (improved but far) | 4.0% | 0.4 – 11.1% |
+| Nutrition (MDD proxy) | 25.6% | 13.2 – 37.2% |
+| Education 5–14 | 23.4% | 3.2 – 65.7% |
+| Education 15–17 | 25.5% | 0.7 – 73.9% |
+| Health (vaccination) | 87.0% | 73.7 – 97.4% |
+
+---
+
+### Priority 6 — DHS Point-Level Training *(after DHS arrives)*
 
 Once DHS GPS clusters are available, the training paradigm can shift from coarse weak supervision to direct point-level regression:
 
@@ -626,12 +965,22 @@ Combined with 4,976 LSMS households already processed, this gives ~6,600 real-wo
 
 ### Summary
 
+Canonical backlog for anything still open: **§ Remaining TODOs (at a glance)**, **§ Master checklist**, and **§ Remaining open items — definitions & full backlog** (D2, M3, U1, C8, E5-GBM, HAZ, LOZO cross-check, Priority 6). **D1** state-level ingestion is **done**; optional LGA harmonisation remains.
+
 | Next Step | Effort | Impact | Blocker |
 |---|---|---|---|
-| **DHS GPS join + validation** | done (`merge_dhs_gps`, `validate_predictions_vs_dhs_gps`) | High | — |
-| DHS point-level training in loss (beyond soft-label blend) | 3–5 days | **Very High** | Design + `main.py` change |
-| Poverty score breakdown / explainability outputs | 2–4 days | High | Attribution design + output schema |
-| LGA-level governance/EMIS features | 2–3 days | Medium | Data requests to FME / NBS |
-| Other countries | 1–2 days per country | High | Country-specific MICS data |
+| **DHS GPS join + validation** | ✅ done | High | — |
+| DHS **stacked/auxiliary Ridge loss** (`dhs_aux_dhs_scale`) | ✅ Sweep run; **scale=1.0** in `config_nga.yaml` | High | Re-validate with **full LOZO** in sweep (optional follow-up) |
+| **Predictions-map UX** (cluster/opacity/sample/legend) | ✅ U2–U6 | **High** stakeholder | — |
+| Poverty score breakdown / Folium / comparison / explainability / LGA rollup | ✅ E1–E4, E6 | High | — |
+| **WSNN permutation importance** | ✅ E5 (WSNN path) | Medium | Run pipeline **with** WSNN to refresh CSV |
+| **GBM SHAP** (optional) | Partial — flag `export_gbm_shap` | Medium | Runtime / dependency |
+| FCT/`Fct` + `pytest` config | ✅ done | Medium | — |
+| **Per-dimension targets + models + LGA rollup + 7-panel map** | ✅ May 2026 | **Very High** | HAZ not in Nigeria MICS6 (MDD proxy) |
+| **D1** NEMIS / NBS MPI / IIAG ingestion | ✅ May 2026 | Medium–High | Optional: **LGA** harmonisation to GADM ADM2; re-run `main.py` to refresh all eval artifacts |
+| **D2** Second country smoke test | 1–2 days per country | High | **MICS + geo** for chosen country |
+| **M3** Asymmetric LOZO loss | Paused | Low–Med | **Product / ethics** policy |
+| **U1** Stakeholder default = LGA view | Adopt in SOPs | Med | Comms / process |
+| **C8** Summary vs checklist drift | Ongoing | Low | Editorial discipline |
 
-**Model currently at 30 features** (28 + 2 DHS nearest-cluster features). Next milestone: full DHS point-level loss integration (beyond soft labels) to move from weak supervision toward cluster-supervised training.
+**Model currently at 46 training features** (28 core geospatial / MICS-proxy columns + 2 DHS nearest-cluster + **16** D1 NBS MPI / NEMIS; **IIAG** stored on the grid but omitted from training as national constants). **Nigeria research pipeline** includes D1 state-level external signals. Suggested next focus: **(1)** **D2** — second country to prove config portability; **(2)** **LOZO-inclusive** aux-stack re-check; **(3)** **U1** adoption; **(4)** optional **GBM SHAP** and **D1 LGA** harmonisation if sub-state validation is required.

@@ -16,6 +16,7 @@ Output
 Data/outputs/nga/maps/nga_comparison_map.html
 """
 
+import html
 import json
 import numpy as np
 import pandas as pd
@@ -74,6 +75,24 @@ UNC_COLOURS    = ["#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b"]
 
 def make_colormap(vmin, vmax, colors, caption):
     return LinearColormap(colors, vmin=vmin, vmax=vmax, caption=caption)
+
+
+def lga_ridge_theme_tooltip_line(row) -> str:
+    """One line of pop-weighted mean Ridge theme contributions (LGA)."""
+    parts: list[tuple[float, str]] = []
+    for k in row.index:
+        if not str(k).startswith("ridge_theme__"):
+            continue
+        v = row[k]
+        if pd.isna(v):
+            continue
+        name = str(k).replace("ridge_theme__", "").replace("_", " ")
+        parts.append((abs(float(v)), f"{name}: {float(v):+.2f}"))
+    if not parts:
+        return ""
+    parts.sort(key=lambda x: -x[0])
+    line = " &nbsp;|&nbsp; ".join(t for _, t in parts[:4])
+    return f"<br><small><b>Ridge themes (LGA):</b> {html.escape(line)}</small>"
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +181,7 @@ def build_map(gdf: gpd.GeoDataFrame) -> folium.Map:
             f"<b>MICS Truth:</b> {row['mics_state_truth']:.1f}%<br>"
             f"<b>Error:</b> {row['ridge_abs_error']:.1f} pp"
         )
+        tip += lga_ridge_theme_tooltip_line(row)
         folium.GeoJson(
             row["geometry"].__geo_interface__,
             style_function=lambda f, c=color: {"fillColor": c, "color": "#444", "weight": 0.4, "fillOpacity": 0.78},
@@ -270,7 +290,7 @@ def build_map(gdf: gpd.GeoDataFrame) -> folium.Map:
         ① MICS state truth &nbsp; ② Ridge prediction<br>
         ③ GAM prediction &nbsp;&nbsp; ④ Ridge error<br>
         ⑤ Uncertainty &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ⑥ NBS monetary poverty<br>
-        <br>Hover over any LGA for details.
+        <br>Hover: Ridge layer shows LGA-mean theme contributions when available.
         </span>
     </div>
     """

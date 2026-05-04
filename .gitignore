@@ -73,11 +73,14 @@ dmypy.json
 *.sav
 
 # Large generated output maps (Nigeria grid = 100K+ points, too large for GitHub)
-Data/outputs/nga/maps/*.html
+# Data/outputs/nga/maps/*.html
 Data/outputs/nga/maps/*.geojson
 
 # Large derived feature files
 Data/Nigeria/features/nga_osm_buildings.parquet
+
+# NEMIS bulk school Excel (~21 MB total — re-download with curl; see Data/Nigeria/d1_external/README.md)
+Data/Nigeria/d1_external/nemis/*.xlsx
 
 # Extracted raster temp files
 /tmp/

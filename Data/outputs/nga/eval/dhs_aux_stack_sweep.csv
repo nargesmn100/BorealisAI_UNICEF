@@ -1,0 +1,6 @@
+tag,dhs_aux_scale,dhs_spearman,dhs_pearson,dhs_mae,dhs_n
+soft_label_w=0.4,0.0,0.4855,0.4759,17.879,102088
+dhs_stack_scale=0.1,0.1,0.2451,0.239,19.056,102088
+dhs_stack_scale=0.25,0.25,0.3241,0.3154,18.615,102088
+dhs_stack_scale=0.5,0.5,0.4135,0.4027,18.19,102088
+dhs_stack_scale=1,1.0,0.5525,0.5426,17.666,102088

@@ -283,6 +283,8 @@ def phase_outputs(
     eval_results: dict,
     eval_report: pd.DataFrame,
     fi_df: pd.DataFrame = None,
+    ridge_model=None,
+    gbm_model=None,
 ) -> None:
     """Save all outputs to disk."""
     logger.info("\n[Phase 7: Outputs]")
@@ -314,6 +316,19 @@ def phase_outputs(
 
     pred_cols = [c for c in pred_cols if c in df.columns]
     pred_table = df[pred_cols].copy()
+
+    # Ridge per-cell explainability: CSV + theme/popup columns merged for Folium/GeoJSON
+    try:
+        from src.outputs.prediction_breakdown import (
+            export_ridge_breakdown,
+            merge_breakdown_into_pred_table,
+            maybe_export_gbm_shap,
+        )
+        _, brk_df = export_ridge_breakdown(cfg, df, ridge_model)
+        pred_table = merge_breakdown_into_pred_table(pred_table, brk_df)
+        maybe_export_gbm_shap(cfg, df, gbm_model)
+    except Exception as e:
+        logger.warning("Prediction breakdown / SHAP export failed: %s", e)
 
     output_prefix = cfg.get("country", {}).get("output_prefix", "jam")
     pred_parquet = os.path.join(tables_dir, f"{output_prefix}_predictions.parquet")
@@ -375,20 +390,72 @@ def phase_outputs(
     # ------------------------------------------------------------------
     try:
         import folium
-        from folium.plugins import MarkerCluster
+        from folium.plugins import MarkerCluster, FastMarkerCluster
         import branca.colormap as cm
 
+        map_cfg = cfg.get("maps", {})
+        use_cluster = map_cfg.get("use_folium_cluster", False)
+        cluster_threshold = int(map_cfg.get("folium_cluster_threshold", 10_000))
+        max_cells_full = int(map_cfg.get("folium_max_cells_full", 0))   # 0 = no cap
+        sample_cells = int(map_cfg.get("folium_sample_cells", 5_000))   # sampled map cells
+
         map_df = pred_table[pred_table["moderate_prevalence"].notna()].copy()
+        n_cells = len(map_df)
+
+        # Auto-tune opacity and radius for dense maps
+        if n_cells > 50_000:
+            fill_opacity = 0.35
+            marker_radius = 3
+        elif n_cells > 20_000:
+            fill_opacity = 0.50
+            marker_radius = 3
+        else:
+            fill_opacity = 0.70
+            marker_radius = 4
+
+        # Auto-enable clustering if above threshold (unless config explicitly sets it False)
+        effective_cluster = use_cluster or (n_cells >= cluster_threshold and map_cfg.get("use_folium_cluster") is None)
+
         center_lat = map_df["latitude"].mean()
         center_lon = map_df["longitude"].mean()
 
-        fmap = folium.Map(location=[center_lat, center_lon], zoom_start=9,
+        fmap = folium.Map(location=[center_lat, center_lon], zoom_start=6,
                           tiles="CartoDB positron")
 
         # Pick the best available prediction column
         col_priority = ["gbm_moderate", "gam_moderate", "ridge_moderate",
                         "rwi_moderate", "uniform_moderate"]
         plot_col = next((c for c in col_priority if c in map_df.columns), None)
+
+        def _make_popup_html(row, plot_col_val):
+            explain = row.get("ridge_bdg_popup")
+            base = (
+                f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
+                f"RWI: {row.get('rwi', 'N/A'):.2f}<br>"
+                f"Pop: {row.get('population', 'N/A'):.0f}<br>"
+                f"Moderate poverty: {plot_col_val:.1f}%"
+            )
+            if explain and isinstance(explain, str) and explain.strip():
+                return base + explain, 360
+            return base, 220
+
+        def _folium_legend_html(plot_col_name: str, n: int, is_sample: bool) -> str:
+            note = f"<br><i style='color:#888;font-size:10px;'>{n:,} cells shown" + (" (sampled)" if is_sample else "") + "</i>"
+            return f"""
+            <div style="position:fixed;top:12px;left:60px;z-index:1000;
+                        background:white;padding:10px 14px;border-radius:8px;
+                        box-shadow:2px 2px 8px rgba(0,0,0,.3);
+                        font-family:Arial,sans-serif;max-width:310px;font-size:12px;">
+              <b style="font-size:13px;">Nigeria Child Deprivation — Cell Level</b><br>
+              <span style="color:#555;">
+                Each <b>circle = 1 grid cell</b> (~1 km²).<br>
+                <b>Colour</b> = {plot_col_name.replace('_',' ')} (%)
+                &nbsp; <b style="color:#2166ac;">▊</b> low &rarr;
+                       <b style="color:#d73027;">▊</b> high<br>
+                <b>Click</b> a circle for values + Ridge explain block.<br>
+                For national overview use <code>nga_comparison_map.html</code>.{note}
+              </span>
+            </div>"""
 
         if plot_col:
             vmin, vmax = map_df[plot_col].quantile(0.02), map_df[plot_col].quantile(0.98)
@@ -399,29 +466,79 @@ def phase_outputs(
             )
             colormap.add_to(fmap)
 
-            for _, row in map_df.iterrows():
+            # Optionally cap rows (full map)
+            draw_df = map_df
+            if max_cells_full > 0 and n_cells > max_cells_full:
+                draw_df = map_df.sample(n=max_cells_full, random_state=42)
+                logger.info("Folium: capped to %d cells (folium_max_cells_full).", max_cells_full)
+
+            if effective_cluster:
+                layer = MarkerCluster(name="Cells")
+                layer.add_to(fmap)
+                dest = layer
+            else:
+                dest = fmap
+
+            for _, row in draw_df.iterrows():
                 val = row[plot_col]
                 if pd.isna(val):
                     continue
+                pop_html, w = _make_popup_html(row, val)
+                folium.CircleMarker(
+                    location=[row["latitude"], row["longitude"]],
+                    radius=marker_radius,
+                    color=None,
+                    fill=True,
+                    fill_color=colormap(val),
+                    fill_opacity=fill_opacity,
+                    popup=folium.Popup(pop_html, max_width=w),
+                ).add_to(dest)
+
+            fmap.get_root().html.add_child(
+                folium.Element(_folium_legend_html(plot_col, len(draw_df), max_cells_full > 0 and n_cells > max_cells_full))
+            )
+
+        html_path = os.path.join(maps_dir, f"{output_prefix}_predictions_map.html")
+        fmap.save(html_path)
+        logger.info("Folium interactive map saved to: %s (n=%d, cluster=%s, opacity=%.2f)",
+                    html_path, len(map_df), effective_cluster, fill_opacity)
+
+        # ---- Sampled map: lighter file for quick demos ----------------
+        if plot_col and n_cells > sample_cells:
+            fmap_s = folium.Map(location=[center_lat, center_lon], zoom_start=6,
+                                tiles="CartoDB positron")
+            colormap.add_to(fmap_s)
+            strat_col = "subregion" if "subregion" in map_df.columns else None
+            if strat_col:
+                per_state = max(1, sample_cells // map_df[strat_col].nunique())
+                sampled = (
+                    map_df.groupby(strat_col, group_keys=False)
+                    .apply(lambda g: g.sample(min(len(g), per_state), random_state=42))
+                    .reset_index(drop=True)
+                )
+            else:
+                sampled = map_df.sample(n=min(sample_cells, n_cells), random_state=42)
+            for _, row in sampled.iterrows():
+                val = row[plot_col]
+                if pd.isna(val):
+                    continue
+                pop_html, w = _make_popup_html(row, val)
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
                     radius=4,
                     color=None,
                     fill=True,
                     fill_color=colormap(val),
-                    fill_opacity=0.75,
-                    popup=folium.Popup(
-                        f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
-                        f"RWI: {row.get('rwi', 'N/A'):.2f}<br>"
-                        f"Pop: {row.get('population', 'N/A'):.0f}<br>"
-                        f"Moderate poverty: {val:.1f}%",
-                        max_width=220,
-                    ),
-                ).add_to(fmap)
+                    fill_opacity=0.70,
+                    popup=folium.Popup(pop_html, max_width=w),
+                ).add_to(fmap_s)
+            fmap_s.get_root().html.add_child(
+                folium.Element(_folium_legend_html(plot_col, len(sampled), True))
+            )
+            sample_html_path = os.path.join(maps_dir, f"{output_prefix}_predictions_map_sample.html")
+            fmap_s.save(sample_html_path)
+            logger.info("Folium sampled map saved to: %s (%d cells)", sample_html_path, len(sampled))
 
-        html_path = os.path.join(maps_dir, f"{output_prefix}_predictions_map.html")
-        fmap.save(html_path)
-        logger.info("Folium interactive map saved to: %s", html_path)
     except ImportError:
         logger.info("folium not installed — skipping interactive map. "
                     "Install with: pip install folium branca")
@@ -455,13 +572,32 @@ def phase_outputs(
             ].copy()
             unc_df["ci_width"] = unc_df[upper_c] - unc_df[lower_c]
 
+            n_unc = len(unc_df)
+            u_opacity = 0.35 if n_unc > 50_000 else (0.50 if n_unc > 20_000 else 0.70)
+            u_radius = 3 if n_unc > 20_000 else 4
+
             center_lat = unc_df["latitude"].mean()
             center_lon = unc_df["longitude"].mean()
 
             umap = folium.Map(
-                location=[center_lat, center_lon], zoom_start=9,
+                location=[center_lat, center_lon], zoom_start=6,
                 tiles="CartoDB positron",
             )
+            umap.get_root().html.add_child(folium.Element(f"""
+            <div style="position:fixed;top:12px;left:60px;z-index:1000;
+                        background:white;padding:10px 14px;border-radius:8px;
+                        box-shadow:2px 2px 8px rgba(0,0,0,.3);
+                        font-family:Arial,sans-serif;max-width:300px;font-size:12px;">
+              <b style="font-size:13px;">Prediction Uncertainty — Cell Level</b><br>
+              <span style="color:#555;">
+                Each <b>circle = 1 grid cell</b>.<br>
+                <b>Colour</b> = 90% CI width (pp) &nbsp;
+                <b style="color:#2c7bb6;">▊</b> narrow &rarr;
+                <b style="color:#d7191c;">▊</b> wide<br>
+                <b>Click</b> for CI bounds + Ridge explain.<br>
+                <i style="font-size:10px;">{n_unc:,} cells shown</i>
+              </span>
+            </div>"""))
 
             vmin = unc_df["ci_width"].quantile(0.02)
             vmax = unc_df["ci_width"].quantile(0.98)
@@ -476,21 +612,38 @@ def phase_outputs(
                 w = row["ci_width"]
                 if pd.isna(w):
                     continue
-                folium.CircleMarker(
-                    location=[row["latitude"], row["longitude"]],
-                    radius=4,
-                    color=None,
-                    fill=True,
-                    fill_color=colormap(np.clip(w, vmin, vmax)),
-                    fill_opacity=0.75,
-                    popup=folium.Popup(
+                uexplain = row.get("ridge_bdg_popup")
+                if (
+                    uexplain is not None
+                    and isinstance(uexplain, str)
+                    and uexplain.strip()
+                ):
+                    uhtml = (
                         f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
                         f"CI width: {w:.2f} pp<br>"
                         f"Lower: {row[lower_c]:.1f}%<br>"
                         f"Upper: {row[upper_c]:.1f}%<br>"
-                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%",
-                        max_width=220,
-                    ),
+                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%"
+                        f"{uexplain}"
+                    )
+                    uw = 360
+                else:
+                    uhtml = (
+                        f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
+                        f"CI width: {w:.2f} pp<br>"
+                        f"Lower: {row[lower_c]:.1f}%<br>"
+                        f"Upper: {row[upper_c]:.1f}%<br>"
+                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%"
+                    )
+                    uw = 220
+                folium.CircleMarker(
+                    location=[row["latitude"], row["longitude"]],
+                    radius=u_radius,
+                    color=None,
+                    fill=True,
+                    fill_color=colormap(np.clip(w, vmin, vmax)),
+                    fill_opacity=u_opacity,
+                    popup=folium.Popup(uhtml, max_width=uw),
                 ).add_to(umap)
 
             unc_html_path = os.path.join(maps_dir, f"{output_prefix}_uncertainty_map.html")
@@ -610,7 +763,10 @@ def main() -> None:
         eval_results, eval_report = phase_eval(cfg, df, skip_gbm=args.skip_gbm, skip_gam=args.skip_gam, skip_wsnn=args.skip_wsnn)
 
         # Phase 7: Outputs
-        phase_outputs(cfg, df, eval_results, eval_report, fi_df=fi_df)
+        phase_outputs(
+            cfg, df, eval_results, eval_report,
+            fi_df=fi_df, ridge_model=ridge_model, gbm_model=gbm_model,
+        )
 
     logger.info("\nPipeline complete.")
 

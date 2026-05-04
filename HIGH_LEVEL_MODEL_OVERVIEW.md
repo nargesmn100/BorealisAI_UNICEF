@@ -83,19 +83,24 @@ From Nigeria MICS6 state x urban/rural aggregates:
 
 ## 3) What Model Is Trained
 
-## Primary model currently used for robust generalization: **Ridge Regression**
+### Primary model: **Ridge Regression**
 
-- **Type:** Regularized linear regression (`StandardScaler + RidgeCV`)
-- **Training style:** weak supervision (state-level targets assigned to cells) + reconciliation
-- **Current enhancement:** DHS soft-label blending enabled (`dhs_soft_label_weight = 0.4`)
+- **Type:** Regularized linear regression (`StandardScaler + RidgeCV`, CV over α)
+- **Training:** weak supervision (state-level MICS targets as soft labels for each cell)
+- **DHS supervision options** (configured in `config_nga.yaml → modeling.ridge`):
+  - **Soft-label blend** (current default, `use_dhs_soft_label: true`, `dhs_soft_label_weight: 0.4`):
+    cell target = 0.6 × state_target + 0.4 × nearest_DHS_cluster_dep × 100.
+  - **Stacked auxiliary loss** (`dhs_aux_dhs_scale > 0`, disables soft-label):
+    two-block least-squares — block 1: MICS labels × √(mics_scale); block 2: DHS cluster labels × √(dhs_scale).
+    More explicit cluster signal but requires tuning. Run `python src/scripts/dhs_aux_sweep.py --skip-lozo` to sweep scales.
 
 Other implemented models (available in pipeline):
 
-- GBM (LightGBM) — tree ensemble
-- GAM — additive spline model
-- WSNN — weakly supervised neural network
+- **GBM** (LightGBM / XGBoost fallback) — nonlinear tree ensemble
+- **GAM** — additive spline model *(generalises poorly on LOZO — not for final maps)*
+- **WSNN** — weakly supervised neural network
 
-For stable held-out geographic performance, Ridge is currently the most reliable baseline in active use.
+For stable held-out geographic performance, Ridge is currently the most reliable model in active use.
 
 ---
 
@@ -169,7 +174,15 @@ So state truth constrains totals, while within-state distribution is learned fro
 - **Useful for targeting:** within-state ranking patterns at LGA/grid level  
 - **Needs continued improvement:** hard held-out outlier states and full DHS point-level loss integration
 
-Next explainability milestone: add explicit contribution breakdown per predicted score (feature-group contributions + raw feature values) so a score like "69%" is decomposed into "why."
+**Explainability artifacts (implemented):**
+- `Data/outputs/nga/tables/nga_prediction_breakdown.csv` — per-cell β·z + theme sums + raw values.
+- `Data/outputs/nga/maps/nga_predictions_map.html` — popups include Ridge explain block.
+- `Data/outputs/nga/tables/nga_lga_predictions.csv` — LGA-aggregated theme + per-feature sums.
+- Run `python src/scripts/build_explainability_map.py` for a theme-dominance map (colours by dominant feature group).
+
+**Open items:** SHAP for GBM/WSNN; dedicated theme-filter dashboard view.
+
+See `§6 Master checklist` in `PROJECT_STATUS.md` for the full list (E3–E6, U-series).
 
 ---
 
@@ -214,10 +227,22 @@ Interpretation: the nearest DHS deprivation signal has strong positive alignment
 
 For each grid cell:
 
-1. Build standardized feature vector from the 30 columns
-2. Compute raw Ridge score:
-   - `raw_score = intercept + sum(beta_i * standardized_feature_i)`
-3. Reconcile within each state so population-weighted state mean matches official MICS state target
-4. Output reconciled score as `ridge_moderate`
+1. Build standardized feature vector `z = (x − mean) / std` from the 30 columns (StandardScaler)
+2. Compute raw Ridge linear score:
+   `raw_score = intercept + Σ_j β_j · z_j`
+3. **Reconcile** within each state: multiply all cell scores by a constant so the population-weighted state mean matches the official MICS state target.
+4. Output the reconciled score as `ridge_moderate`.
 
-So the final poverty score is a reconciled linear combination of the modeled feature effects, constrained to official state totals.
+**Important distinction:** the **linear decomposition** (`ridge_bdg__<feature>` = β_j · z_j columns in `nga_prediction_breakdown.csv`) reflects the **pre-reconciliation** linear scores. After reconciliation the relative within-state ordering is preserved but the absolute scale is shifted. This is intentional — the model learns spatial variation; the official total is imposed by reconciliation.
+
+**What `nga_prediction_breakdown.csv` gives you per cell:**
+
+| Column prefix | What it is |
+|---|---|
+| `ridge_bdg__<feature>` | β_j · z_j contribution for that feature (pre-reconciliation) |
+| `ridge_theme__<group>` | Sum of β_j · z_j over features in that theme group |
+| `raw__<feature>` | Raw (unstandardized) feature value at that cell |
+| `ridge_bdg_linear_pred` | Sum of all β_j · z_j + intercept (= `model.predict(X)`) |
+| `ridge_moderate` (in predictions) | Reconciled cell prediction |
+
+The breakdown quantifies "what pushed the score up or down before the state total was imposed." It is the correct decomposition for **within-state ranking** and **feature explanation**.

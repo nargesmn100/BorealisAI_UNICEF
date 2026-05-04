@@ -33,8 +33,9 @@ paths:
   grid_file:             "Data/interim/nga/nga_base_grid.parquet"
   grid_with_proxies_file: "Data/interim/nga/nga_grid_proxies.parquet"
   grid_with_admin_file:  "Data/interim/nga/nga_grid_admin.parquet"
-  targets_file:          "Data/interim/nga/nga_targets.csv"
-  modeling_table_file:   "Data/interim/nga/nga_modeling_table.parquet"
+  targets_file:               "Data/interim/nga/nga_targets.csv"
+  dimension_targets_file:     "Data/interim/nga/nga_dimension_targets.csv"
+  modeling_table_file:        "Data/interim/nga/nga_modeling_table.parquet"
 
   # Final outputs
   outputs_dir: "Data/outputs/nga"
@@ -121,6 +122,28 @@ modeling:
     - "diarrhea_care_rate"
     - "dhs_nearest_dep_index"
     - "dist_km_nearest_dhs_cluster"
+    # ── D1 external features (NBS MPI + NEMIS) — added May 2026 ──────────────
+    # NBS MPI microdata aggregated to state level (9 features)
+    - "nbs_floor_earth_pct"           # % HH with earth/sand floor (shelter deprivation proxy)
+    - "nbs_floor_finished_pct"        # % HH with finished floor (shelter quality)
+    - "nbs_water_improved_pct"        # % HH with improved water source
+    - "nbs_water_far_pct"             # % HH needing ≥30 min to fetch water
+    - "nbs_toilet_improved_pct"       # % HH with non-shared improved toilet
+    - "nbs_open_defecation_pct"       # % HH using open defecation (worst sanitation)
+    - "nbs_food_insecure_pct"         # % HH moderately+ food insecure (HFIAS ≥3 items)
+    - "nbs_food_severe_pct"           # % HH severely food insecure (HFIAS ≥5 items)
+    - "nbs_health_far_pct"            # % HH with nearest health facility >30 min away
+    # NEMIS school system (7 key features — state-level aggregates)
+    - "nemis_primary_schools"         # count of primary schools per state
+    - "nemis_primary_enrol"           # total primary enrolment per state
+    - "nemis_primary_pupil_per_school" # avg pupils per primary school (crowding proxy)
+    - "nemis_jss_schools"             # count of Junior Secondary Schools
+    - "nemis_sss_schools"             # count of Senior Secondary Schools
+    - "nemis_public_pct"              # % schools that are public
+    - "nemis_rural_pct"               # % schools in rural areas
+    # NOTE: iiag_* features are stored in the modeling table but excluded here because
+    # they are national-level scalars (constant across all NGA cells, zero within-Nigeria
+    # variation). Include them when training a multi-country model.
 
   primary_target:   "moderate_prevalence"
   secondary_target: "severe_prevalence"
@@ -135,6 +158,36 @@ modeling:
     # Optional: blend zone (or quintile) targets with DHS cluster deprivation (0–1 → %)
     use_dhs_soft_label: true
     dhs_soft_label_weight: 0.4
+    # -------------------------------------------------------------------
+    # DHS cluster supervision: two mutually exclusive approaches.
+    #
+    # A) Soft-label blend (current default):
+    #    Training target for each cell = (1-w)*zone_target + w*dhs_nearest_dep_index*100
+    #    Pro: simple, no extra parameters.  Con: the DHS signal is averaged in with MICS,
+    #    so the model still treats every cell in a state almost the same.
+    #
+    # B) Stacked auxiliary loss (dhs_aux_dhs_scale > 0):
+    #    Two-block least-squares: block1 = MICS labels × sqrt(mics_scale);
+    #                             block2 = DHS cluster labels × sqrt(dhs_scale) on cells
+    #                             that have a near-by DHS cluster measurement.
+    #    Setting dhs_aux_dhs_scale > 0 disables soft-label blend for training.
+    #    The DHS block directly pulls β·x toward the cluster measurement.
+    #    Pro: explicit cell-level cluster signal; more powerful for spatial disaggregation.
+    #    Con: harder to tune; cluster GPS is jittered ±5km so nearest-cell assignment
+    #         is approximate.
+    #    Tune: run `python src/scripts/dhs_aux_sweep.py --skip-lozo` to compare scales.
+    #    Recommended starting grid: 0.1, 0.25, 0.5, 1.0.
+    # -------------------------------------------------------------------
+    dhs_aux_mics_scale: 1.0
+    # Sweep result (May 2026): scale=1.0 → DHS Spearman=0.553, MAE=17.67 pp
+    # vs soft-label baseline Spearman=0.486, MAE=17.88 pp → stacked is better.
+    # use_dhs_soft_label is automatically disabled when dhs_aux_dhs_scale > 0.
+    dhs_aux_dhs_scale: 1.0  # previously 0.0 (soft-label blend); updated after sweep
+
+  # Per-cell Ridge contribution CSV + optional GBM SHAP sample (see src/outputs/prediction_breakdown.py)
+  export_prediction_breakdown: true
+  export_gbm_shap: false
+  gbm_shap_max_cells: 2000
 
   # Gradient boosted trees
   gbm:
@@ -210,6 +263,182 @@ evaluation:
         eval_level:  "state_urban_rural"
       - train_level: "state"
         eval_level:  "state_urban_rural"
+
+# ---------------------------------------------------------------------------
+# Map / visualisation settings
+# ---------------------------------------------------------------------------
+maps:
+  # MarkerCluster: false = plain markers (for zoomed/small maps); true = clustered;
+  # null (default) = auto-enable clustering when n_cells >= folium_cluster_threshold.
+  use_folium_cluster: null
+  folium_cluster_threshold: 10000
+
+  # Hard cap on full prediction map; 0 = no cap (may be very slow for NGA).
+  folium_max_cells_full: 0
+
+  # Sampled map cell count (stratified by subregion; written as *_sample.html).
+  folium_sample_cells: 5000
+
+# ---------------------------------------------------------------------------
+# Per-dimension deprivation models (Kyriaki specification, May 2026)
+# ---------------------------------------------------------------------------
+# Run via: python src/scripts/run_dimension_models.py --country nga
+#
+# Each dimension trains its own Ridge model using the state-level dimension
+# target (e.g. shelter_moderate_prev) instead of the composite moderate_prevalence.
+# Outputs: Data/outputs/nga/tables/nga_dimension_predictions.csv
+#          Data/outputs/nga/maps/nga_dimension_{dim}_map.html  (one per dimension)
+#          Data/outputs/nga/eval/nga_dimension_summary.csv
+dimensions:
+  run:              true    # compute dimension targets when targets are (re-)computed
+  model:            "ridge" # ridge only for now (fast, interpretable)
+  dimensions:
+    - shelter
+    - sanitation
+    - water
+    - nutrition     # NOTE: HAZ not available; MDD proxy used for Nigeria MICS6
+    - edu_5_14
+    - edu_15_17
+    - health
+  output_maps:      true    # generate one Folium HTML per dimension
+  output_csv:       true    # nga_dimension_predictions.csv
+
+  # Optional: per-dimension feature sets.  If a dimension key is absent,
+  # all features from modeling.features are used.
+  # These are domain-guided subsets that improve signal-to-noise given only
+  # 37 training states.  All remain Ridge-regularized via RidgeCV.
+  feature_overrides:
+    shelter:
+      - "population"
+      - "log_population"
+      - "building_density"
+      - "log_building_density"
+      - "ghsl_built_frac"
+      - "log_ghsl_built"
+      - "smod_class"
+      - "is_urban"
+      - "rwi"
+      - "nightlights"
+      - "log_nightlights"
+      - "travel_time_cities"
+      - "log_travel_time_cities"
+      # D1 NBS MPI — direct shelter quality ground-truth from official survey
+      - "nbs_floor_earth_pct"
+      - "nbs_floor_finished_pct"
+
+    sanitation:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "building_density"
+      - "log_building_density"
+      - "ghsl_built_frac"
+      - "population"
+      - "nightlights"
+      - "travel_time_cities"
+      - "travel_time_50k"
+      - "dhs_nearest_dep_index"
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NBS MPI — direct WASH ground-truth from official survey
+      - "nbs_toilet_improved_pct"
+      - "nbs_open_defecation_pct"
+
+    water:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "rainfall_mm"
+      - "travel_time_cities"
+      - "travel_time_50k"
+      - "log_travel_time_cities"
+      - "log_travel_time_50k"
+      - "population"
+      - "nightlights"
+      - "dhs_nearest_dep_index"
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NBS MPI — direct water access ground-truth from official survey
+      - "nbs_water_improved_pct"
+      - "nbs_water_far_pct"
+
+    nutrition:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "population"
+      - "rainfall_mm"
+      - "dist_health_km"
+      - "anc_rate"
+      - "skilled_delivery_rate"
+      - "facility_delivery_rate"
+      - "dhs_nearest_dep_index"
+      - "conflict_events"
+      - "nightlights"
+      # D1 NBS MPI — food security and health access proxies
+      - "nbs_food_insecure_pct"
+      - "nbs_food_severe_pct"
+      - "nbs_health_far_pct"
+
+    edu_5_14:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "dist_school_km"
+      - "school_attendance_rate"
+      - "ever_attended_rate"
+      - "public_school_rate"
+      - "population"
+      - "travel_time_cities"
+      - "conflict_events"
+      - "conflict_fatalities"
+      - "nightlights"
+      - "dhs_nearest_dep_index"
+      # D1 NEMIS — system-level school supply features
+      - "nemis_primary_schools"
+      - "nemis_primary_enrol"
+      - "nemis_primary_pupil_per_school"
+      - "nemis_public_pct"
+      - "nemis_rural_pct"
+
+    edu_15_17:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "dist_school_km"
+      - "school_attendance_rate"
+      - "ever_attended_rate"
+      - "public_school_rate"
+      - "population"
+      - "travel_time_cities"
+      - "conflict_events"
+      - "conflict_fatalities"
+      - "nightlights"
+      - "dhs_nearest_dep_index"
+      # D1 NEMIS — secondary school supply features
+      - "nemis_jss_schools"
+      - "nemis_sss_schools"
+      - "nemis_primary_pupil_per_school"
+      - "nemis_public_pct"
+      - "nemis_rural_pct"
+
+    health:
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "dist_health_km"
+      - "vacc_card_rate"
+      - "diarrhea_care_rate"
+      - "anc_rate"
+      - "skilled_delivery_rate"
+      - "facility_delivery_rate"
+      - "population"
+      - "travel_time_cities"
+      - "travel_time_50k"
+      - "conflict_events"
+      - "dhs_nearest_dep_index"
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NBS MPI — health and sanitation access from official survey
+      - "nbs_health_far_pct"
+      - "nbs_toilet_improved_pct"
 
 # ---------------------------------------------------------------------------
 # Logging

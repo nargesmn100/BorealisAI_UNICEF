@@ -6,8 +6,11 @@ boundaries and produces population-weighted aggregate estimates.
 
 Outputs
 -------
-  Data/outputs/nga/tables/nga_lga_predictions.csv   — flat table (775 LGAs)
-  Data/outputs/nga/maps/nga_lga_predictions.geojson — polygon layer for GIS/mapping
+  Data/outputs/nga/tables/nga_lga_predictions.csv
+      — flat table (775 LGAs): predictions, Ridge theme sums, full per-feature
+        β·z contributions (prefixed ridge_bdg__*), and raw feature means.
+  Data/outputs/nga/maps/nga_lga_predictions.geojson
+      — polygon GIS layer (themes + predictions only; raw values omitted for size).
 
 Usage
 -----
@@ -35,6 +38,13 @@ _PRED_COLS = [
     "ridge_moderate_lower", "ridge_moderate_upper",
     "gbm_moderate_lower", "gbm_moderate_upper",
     "rwi_moderate", "heuristic_moderate", "uniform_moderate",
+]
+
+# Per-dimension prediction columns (Kyriaki spec)
+_DIMENSION_COLS = [
+    "shelter_moderate", "sanitation_moderate", "water_moderate",
+    "nutrition_moderate", "edu_5_14_moderate", "edu_15_17_moderate",
+    "health_moderate",
 ]
 
 
@@ -87,6 +97,28 @@ def aggregate_to_lga(
     logger.info("LGAs loaded: %d", len(lga))
 
     # -----------------------------------------------------------------------
+    # Optionally merge per-dimension predictions from nga_dimension_predictions.csv
+    # -----------------------------------------------------------------------
+    dim_pred_path = os.path.join(
+        cfg["paths"].get("tables_dir", "Data/outputs/nga/tables"),
+        f"{output_prefix}_dimension_predictions.csv",
+    )
+    if os.path.isfile(dim_pred_path):
+        try:
+            dim_preds = pd.read_csv(dim_pred_path)[
+                ["latitude", "longitude"] + [c for c in _DIMENSION_COLS]
+            ]
+            pred_table = pred_table.merge(
+                dim_preds, on=["latitude", "longitude"], how="left"
+            )
+            found_dims = [c for c in _DIMENSION_COLS if c in pred_table.columns]
+            logger.info("Merged dimension predictions: %d columns", len(found_dims))
+        except Exception as e:
+            logger.warning("Could not merge dimension predictions (non-fatal): %s", e)
+    else:
+        logger.debug("Dimension predictions file not found — skipping merge: %s", dim_pred_path)
+
+    # -----------------------------------------------------------------------
     # Spatial join: assign each grid cell to its LGA
     # -----------------------------------------------------------------------
     valid = pred_table.dropna(subset=["longitude", "latitude"]).copy()
@@ -109,6 +141,12 @@ def aggregate_to_lga(
     # Population-weighted aggregation
     # -----------------------------------------------------------------------
     pred_cols = [c for c in _PRED_COLS if c in joined.columns]
+    dim_cols = [c for c in _DIMENSION_COLS if c in joined.columns]
+    theme_cols = [c for c in joined.columns if c.startswith("ridge_theme__")]
+    # Per-feature β·z contribution columns (from prediction_breakdown merge)
+    bdg_cols = [c for c in joined.columns if c.startswith("ridge_bdg__") and not c.endswith("_popup")]
+    # Raw feature value columns (raw__<feature>)
+    raw_cols = [c for c in joined.columns if c.startswith("raw__")]
     lga_matched = joined.dropna(subset=["lga_id"]).copy()
 
     rows = []
@@ -134,6 +172,27 @@ def aggregate_to_lga(
                 float(np.average(vals, weights=pop)) if pop_sum > 0 else float(vals.mean()),
                 2,
             )
+        def _popw_mean(col):
+            vals = grp[col].values.astype(float)
+            okw = np.isfinite(vals) & (pop > 0)
+            if okw.any() and pop[okw].sum() > 0:
+                return round(float(np.average(vals[okw], weights=pop[okw])), 4)
+            elif np.isfinite(vals).any():
+                return round(float(np.nanmean(vals)), 4)
+            return np.nan
+
+        for col in dim_cols:
+            row[col] = _popw_mean(col)
+
+        for col in theme_cols:
+            row[col] = _popw_mean(col)
+
+        for col in bdg_cols:
+            row[col] = _popw_mean(col)
+
+        for col in raw_cols:
+            row[col] = _popw_mean(col)
+
         rows.append(row)
 
     lga_preds = pd.DataFrame(rows)
@@ -148,8 +207,15 @@ def aggregate_to_lga(
     # -----------------------------------------------------------------------
     # Merge geometry and save GeoJSON
     # -----------------------------------------------------------------------
-    keep_geo_cols = ["lga_id", "state", "lga_name", "n_cells", "total_population",
-                     "pct_urban", "mics_state_truth"] + pred_cols
+    # GeoJSON: omit raw__ and ridge_bdg__ columns (they balloon file size);
+    # the CSV contains the full set.
+    keep_geo_cols = (
+        ["lga_id", "state", "lga_name", "n_cells", "total_population",
+         "pct_urban", "mics_state_truth"]
+        + pred_cols
+        + [c for c in dim_cols if c in lga_preds.columns]
+        + [c for c in theme_cols if c in lga_preds.columns]
+    )
     keep_geo_cols = [c for c in keep_geo_cols if c in lga_preds.columns]
     lga_geo = lga.merge(
         lga_preds[keep_geo_cols].drop(columns=["state", "lga_name"], errors="ignore"),

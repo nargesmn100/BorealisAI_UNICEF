@@ -19,6 +19,7 @@ This implements the core methodology from the problem statement:
 """
 
 import logging
+import os
 from typing import Dict, Tuple, Optional
 
 import numpy as np
@@ -354,6 +355,82 @@ def _prepare_quintile_groups(
     return groups, targets
 
 
+def _wsnn_permutation_importance(
+    model,
+    X: np.ndarray,
+    df_mask: pd.DataFrame,
+    feature_cols: list[str],
+    n_repeats: int = 30,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """
+    Permutation importance for a trained WSNN model.
+
+    Shuffles each feature column n_repeats times and measures the mean increase
+    in zone-level MAE vs the baseline (unshuffled) prediction.  A larger MAE
+    increase indicates greater importance.
+
+    Parameters
+    ----------
+    model : WeaklySupervisedNN
+        Trained WSNN model for moderate prevalence.
+    X : np.ndarray, shape [n_cells, n_features]
+        Imputed, unscaled feature matrix (model handles internal scaling).
+    df_mask : pd.DataFrame
+        Modeling rows (same rows as X).
+    feature_cols : list[str]
+        Feature names in the same order as X columns.
+    n_repeats : int
+        Number of shuffle repetitions per feature.
+    random_state : int
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: feature, mean_importance, std_importance, n_repeats
+        Sorted descending by mean_importance.
+    """
+    rng = np.random.default_rng(random_state)
+
+    def _zone_mae(preds: np.ndarray) -> float:
+        tmp = df_mask[["subregion", "moderate_prevalence", "population"]].copy()
+        tmp["pred"] = preds
+        err = 0.0
+        n = 0
+        for _, grp in tmp.groupby("subregion"):
+            w = grp["population"].fillna(0).clip(lower=0).values
+            if w.sum() == 0:
+                continue
+            pred_zone = float(np.average(grp["pred"].values, weights=w))
+            true_zone = float(grp["moderate_prevalence"].iloc[0])
+            err += abs(pred_zone - true_zone)
+            n += 1
+        return err / max(n, 1)
+
+    baseline_preds = model.predict(X)
+    baseline_mae = _zone_mae(baseline_preds)
+    logger.info("WSNN permutation importance — baseline zone MAE: %.3f", baseline_mae)
+
+    rows = []
+    for j, feat in enumerate(feature_cols):
+        deltas = []
+        for _ in range(n_repeats):
+            X_perm = X.copy()
+            X_perm[:, j] = rng.permutation(X_perm[:, j])
+            perm_preds = model.predict(X_perm)
+            perm_mae = _zone_mae(perm_preds)
+            deltas.append(perm_mae - baseline_mae)
+        rows.append({
+            "feature": feat,
+            "mean_importance": float(np.mean(deltas)),
+            "std_importance": float(np.std(deltas)),
+            "n_repeats": n_repeats,
+        })
+
+    fi_df = pd.DataFrame(rows).sort_values("mean_importance", ascending=False).reset_index(drop=True)
+    return fi_df
+
+
 def run(cfg: dict, df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
     """
     Run weakly supervised neural network with aggregation-based training.
@@ -515,9 +592,34 @@ def run(cfg: dict, df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
         models[f'{target_type}_depth'] = model
     
     logger.info("Weakly supervised NN complete.")
-    
+
+    # --- Permutation importance (E5) ---
+    # Uses the moderate-prevalence model to compute feature-drop MAE scores.
+    try:
+        n_repeats = cfg.get("modeling", {}).get("weakly_supervised", {}).get(
+            "n_importance_repeats", 30
+        )
+        fi_df = _wsnn_permutation_importance(
+            models["moderate"], X, df[mask], feature_cols,
+            n_repeats=n_repeats, random_state=42
+        )
+        eval_dir = cfg["paths"]["eval_dir"]
+        os.makedirs(eval_dir, exist_ok=True)
+        prefix = cfg.get("country", {}).get("output_prefix", "nga")
+        fi_path = os.path.join(eval_dir, f"{prefix}_wsnn_importance.csv")
+        fi_df.to_csv(fi_path, index=False)
+        logger.info(
+            "WSNN permutation importance saved: %s\n%s",
+            fi_path,
+            fi_df.head(10).to_string(index=False),
+        )
+    except Exception as e:
+        logger.warning("WSNN permutation importance failed (non-fatal): %s", e)
+        fi_df = None
+
     return df, {
         'models': models,
         'feature_cols': feature_cols,
-        'supervision_type': '15 quintile groups' if use_quintile else '3 zone groups'
+        'supervision_type': '15 quintile groups' if use_quintile else '3 zone groups',
+        'permutation_importance': fi_df,
     }

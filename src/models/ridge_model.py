@@ -32,6 +32,10 @@ Limitations
 - With only 3 zones, the model cannot learn zone-specific intercepts
 - Ridge regression gives linear effects of features — interpretable via
   coefficients and standardised importances
+- Optional *stacked* DHS cluster term (``dhs_aux_dhs_scale``): extra weighted
+  least-squares rows that align ``Xβ`` with nearest-cluster DHS deprivation
+  in addition to the MICS/zone (or soft-blend) target — distinct from the scalar
+  DHS soft-label blend.
 
 Model outputs
 -------------
@@ -238,6 +242,90 @@ def bootstrap_uncertainty(
     return mean_pred, lower, upper
 
 
+def build_dhs_stacked_ridge_xy(
+    X: np.ndarray,
+    y_mics_residual: np.ndarray,
+    y_dhs_residual: np.ndarray,
+    dhs_valid: np.ndarray,
+    mics_scale: float,
+    dhs_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Stacked (weighted) least squares: augment the MICS block with rows that
+    pull predictions toward DHS cluster deprivation on cells with a valid
+    nearest-cluster index.
+
+    Each block is scaled by sqrt(weight) so the effective loss is
+    w_mics * ||y_mics - Xβ||² + w_dhs * ||y_dhs - Xβ||² on the DHS-labeled rows.
+    """
+    sm = float(np.sqrt(max(mics_scale, 0.0)))
+    sd = float(np.sqrt(max(dhs_scale, 0.0)))
+    n = len(X)
+    y_dhs = np.asarray(y_dhs_residual, dtype=float)
+    valid = np.asarray(dhs_valid, dtype=bool) & np.isfinite(y_dhs)
+    if sm <= 0.0 or n == 0:
+        raise ValueError("Invalid MICS scale or empty training set for stacked Ridge.")
+    X_top = sm * X
+    y_top = sm * np.asarray(y_mics_residual, dtype=float)
+    if sd <= 0.0 or not valid.any():
+        return X_top, y_top
+    X_bot = sd * X[valid]
+    y_bot = sd * y_dhs[valid]
+    return np.vstack([X_top, X_bot]), np.concatenate([y_top, y_bot])
+
+
+def bootstrap_uncertainty_dhs_stack(
+    model_cls,
+    model_kwargs: dict,
+    X_train: np.ndarray,
+    y_mics_res: np.ndarray,
+    y_dhs_res: np.ndarray,
+    dhs_valid: np.ndarray,
+    mics_scale: float,
+    dhs_scale: float,
+    X_pred: np.ndarray,
+    n_bootstrap: int = 50,
+    random_state: int = 42,
+) -> tuple:
+    """
+    Bootstrap for Ridge when training used DHS stacked targets; resamples
+    the MICS row index and rebuilds the stacked matrix each draw.
+    """
+    rng = np.random.default_rng(random_state)
+    n = len(X_train)
+    preds = np.zeros((n_bootstrap, len(X_pred)))
+    dhs_v = np.asarray(dhs_valid, dtype=bool)
+    y_m = np.asarray(y_mics_res, dtype=float)
+    y_d = np.asarray(y_dhs_res, dtype=float)
+
+    logger.info("Running %d bootstrap samples (DHS-stacked Ridge)...", n_bootstrap)
+
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        X_s, y_s = build_dhs_stacked_ridge_xy(
+            X_train[idx],
+            y_m[idx],
+            y_d[idx],
+            dhs_v[idx],
+            mics_scale,
+            dhs_scale,
+        )
+        m = model_cls(**model_kwargs)
+        m.fit(X_s, y_s)
+        preds[b] = m.predict(X_pred)
+
+    mean_pred = preds.mean(axis=0)
+    lower = np.percentile(preds, 5, axis=0)
+    upper = np.percentile(preds, 95, axis=0)
+    logger.info(
+        "Bootstrap uncertainty (DHS stack): mean range [%.3f, %.3f], "
+        "90%% CI width: mean=%.3f",
+        mean_pred.min(), mean_pred.max(),
+        (upper - lower).mean(),
+    )
+    return mean_pred, lower, upper
+
+
 def run(
     cfg: dict,
     df: pd.DataFrame,
@@ -297,30 +385,51 @@ def run(
     if use_quintile_target and "quintile_target_moderate" in df.columns:
         qt_valid = df.loc[train_mask, "quintile_target_moderate"].notna()
         if qt_valid.sum() > 10:
-            y_train = df.loc[train_mask, "quintile_target_moderate"].values.astype(float)
+            y_mics = df.loc[train_mask, "quintile_target_moderate"].values.astype(float)
             logger.info(
                 "Using quintile pseudo-targets for training (%d cells). "
                 "Range: [%.1f%%, %.1f%%]",
-                len(y_train), np.nanmin(y_train), np.nanmax(y_train),
+                len(y_mics), np.nanmin(y_mics), np.nanmax(y_mics),
             )
         else:
-            y_train = df.loc[train_mask, target_moderate].values.astype(float)
+            y_mics = df.loc[train_mask, target_moderate].values.astype(float)
             logger.info("Quintile targets insufficient. Falling back to zone-level targets.")
     else:
-        y_train = df.loc[train_mask, target_moderate].values.astype(float)
+        y_mics = df.loc[train_mask, target_moderate].values.astype(float)
         if use_quintile_target:
             logger.info("quintile_target_moderate column not found. Using zone-level targets.")
 
+    # DHS: cluster-level target (0–1 → %) aligned with MICS / Ridge label scale
+    dhs_train_pct = None
+    if "dhs_nearest_dep_index" in df.columns:
+        dhs_train_pct = (
+            df.loc[train_mask, "dhs_nearest_dep_index"].to_numpy(dtype=float) * 100.0
+        )
+    dhs_aux_dhs = float(ridge_cfg.get("dhs_aux_dhs_scale", 0.0))
+    dhs_aux_mics = float(ridge_cfg.get("dhs_aux_mics_scale", 1.0))
+    use_dhs_stack = (
+        dhs_aux_dhs > 0.0
+        and dhs_train_pct is not None
+    )
+
     # ------------------------------------------------------------------
-    # Optional DHS soft label: blend aggregate target with nearest-cluster DHS deprivation
+    # Optional DHS soft label: blend aggregate target with nearest-cluster DHS
+    # (skipped when DHS stacked auxiliary term is used — that term carries cluster signal)
     # ------------------------------------------------------------------
     use_dhs_sl = ridge_cfg.get("use_dhs_soft_label", False)
     dhs_w = float(ridge_cfg.get("dhs_soft_label_weight", 0.0))
-    if use_dhs_sl and dhs_w > 0 and "dhs_nearest_dep_index" in df.columns:
-        dhs_pct = df.loc[train_mask, "dhs_nearest_dep_index"].to_numpy(dtype=float) * 100.0
+    if use_dhs_stack:
+        y_train = y_mics.copy()
+        if use_dhs_sl and dhs_w > 0:
+            logger.info(
+                "DHS soft-label blend is disabled when dhs_aux_dhs_scale > 0 "
+                "(using stacked cluster supervision instead).",
+            )
+    elif use_dhs_sl and dhs_w > 0 and dhs_train_pct is not None:
+        dhs_pct = dhs_train_pct
         valid = np.isfinite(dhs_pct)
         if valid.sum() > 0:
-            y_zone = y_train.copy()
+            y_zone = y_mics.copy()
             y_train = y_zone.copy()
             y_train[valid] = (1.0 - dhs_w) * y_zone[valid] + dhs_w * dhs_pct[valid]
             logger.info(
@@ -328,6 +437,10 @@ def run(
                 dhs_w,
                 int(valid.sum()),
             )
+        else:
+            y_train = y_mics.copy()
+    else:
+        y_train = y_mics.copy()
 
     # ------------------------------------------------------------------
     # RWI prior: compute prior and train on residuals
@@ -361,14 +474,50 @@ def run(
                 rwi_prior_full[zmask] = zone_target
 
         rwi_prior_train = rwi_prior_full[train_mask]
-        y_train = y_train - rwi_prior_train
+        y_mics_res = y_train - rwi_prior_train
         logger.info(
-            "RWI prior computed. Residual range: [%.3f, %.3f], mean=%.4f",
-            y_train.min(), y_train.max(), y_train.mean(),
+            "RWI prior computed. MICS residual range: [%.3f, %.3f], mean=%.4f",
+            y_mics_res.min(), y_mics_res.max(), y_mics_res.mean(),
         )
     else:
+        y_mics_res = y_train
         if use_rwi_prior:
             logger.info("RWI column not found. Skipping RWI prior.")
+
+    y_dhs_res = None
+    dhs_valid = None
+    if dhs_train_pct is not None:
+        y_dhs_res = dhs_train_pct.astype(float).copy()
+        if rwi_prior_train is not None:
+            y_dhs_res = y_dhs_res - rwi_prior_train
+        dhs_valid = np.isfinite(dhs_train_pct) & np.isfinite(y_dhs_res)
+    if use_dhs_stack:
+        if dhs_valid is None or not dhs_valid.any():
+            logger.warning(
+                "dhs_aux_dhs_scale > 0 but no valid DHS cluster labels on training rows. "
+                "Fitting MICS targets only (no DHS stack).",
+            )
+            use_dhs_stack = False
+        else:
+            logger.info(
+                "DHS stacked Ridge: mics_scale=%.4f, dhs_scale=%.4f, "
+                "DHS-supervised training rows in aux block: %d.",
+                dhs_aux_mics,
+                dhs_aux_dhs,
+                int(dhs_valid.sum()),
+            )
+
+    X_train_fit = X_train
+    y_train_fit = y_mics_res
+    if use_dhs_stack:
+        X_train_fit, y_train_fit = build_dhs_stacked_ridge_xy(
+            X_train,
+            y_mics_res,
+            y_dhs_res,
+            dhs_valid,
+            dhs_aux_mics,
+            dhs_aux_dhs,
+        )
 
     # ------------------------------------------------------------------
     # Fit model
@@ -379,7 +528,7 @@ def run(
         cv_folds=ridge_cfg["cv_folds"],
         random_state=ridge_cfg["random_state"],
     )
-    model.fit(X_train, y_train, feature_names=feature_cols)
+    model.fit(X_train_fit, y_train_fit, feature_names=feature_cols)
 
     # Log coefficient table
     coef_table = model.get_coef_table()
@@ -457,19 +606,38 @@ def run(
     rs = uncertainty_cfg.get("random_state", 42)
 
     logger.info("Running bootstrap uncertainty estimation (%d samples)...", n_bootstrap)
-    _, lower_raw, upper_raw = bootstrap_uncertainty(
-        model_cls=RidgeDeprivationModel,
-        model_kwargs={
-            "alpha_candidates": ridge_cfg["alpha_candidates"],
-            "cv_folds": ridge_cfg["cv_folds"],
-            "random_state": rs,
-        },
-        X_train=X_train,
-        y_train=y_train,
-        X_pred=X_pred,
-        n_bootstrap=n_bootstrap,
-        random_state=rs,
-    )
+    if use_dhs_stack and dhs_valid is not None and y_dhs_res is not None:
+        _, lower_raw, upper_raw = bootstrap_uncertainty_dhs_stack(
+            model_cls=RidgeDeprivationModel,
+            model_kwargs={
+                "alpha_candidates": ridge_cfg["alpha_candidates"],
+                "cv_folds": ridge_cfg["cv_folds"],
+                "random_state": rs,
+            },
+            X_train=X_train,
+            y_mics_res=y_mics_res,
+            y_dhs_res=y_dhs_res,
+            dhs_valid=dhs_valid,
+            mics_scale=dhs_aux_mics,
+            dhs_scale=dhs_aux_dhs,
+            X_pred=X_pred,
+            n_bootstrap=n_bootstrap,
+            random_state=rs,
+        )
+    else:
+        _, lower_raw, upper_raw = bootstrap_uncertainty(
+            model_cls=RidgeDeprivationModel,
+            model_kwargs={
+                "alpha_candidates": ridge_cfg["alpha_candidates"],
+                "cv_folds": ridge_cfg["cv_folds"],
+                "random_state": rs,
+            },
+            X_train=X_train,
+            y_train=y_mics_res,
+            X_pred=X_pred,
+            n_bootstrap=n_bootstrap,
+            random_state=rs,
+        )
 
     df["ridge_moderate_lower"] = np.nan
     df["ridge_moderate_upper"] = np.nan

@@ -107,16 +107,25 @@ def _assign_subregion(row: pd.Series, kma_gids: list) -> str:
         return "Rural"
 
 
+_SUBREGION_HARMONISE: dict[str, str] = {
+    # Nigeria: GADM uses "Federal Capital Territory"; MICS SPSS may give "Fct"
+    # All comparisons are done after .strip().title() so keys must be Title Case.
+    "Federal Capital Territory": "Fct",
+}
+
+
 def _assign_subregion_admin_level1(row: pd.Series) -> str:
     """
     Assign subregion = GADM NAME_1 directly (for admin_level1 strategy).
 
-    Used for countries like Nigeria where each state is a subregion.
+    Applies ``_SUBREGION_HARMONISE`` to reconcile GADM labels with MICS SPSS
+    value-label variants (e.g. "Federal Capital Territory" → "Fct").
     """
     name = row.get("parish_name")
     if pd.isna(name) or name == "":
         return "Unknown"
-    return str(name)
+    name = str(name).strip()
+    return _SUBREGION_HARMONISE.get(name, name)
 
 
 def assign_admin(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:

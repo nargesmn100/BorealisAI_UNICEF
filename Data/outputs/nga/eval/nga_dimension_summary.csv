@@ -1,0 +1,8 @@
+dimension,label,target_col,n_states,alpha,zone_pearson_r,zone_pearson_p,target_mean,pred_mean
+shelter,Shelter (overcrowding),shelter_moderate_prev,36,10.0,,,56.06,52.01
+sanitation,Sanitation access,sanitation_moderate_prev,36,1.0,,,1.98,1.82
+water,Water access,water_moderate_prev,36,1000.0,,,4.25,4.28
+nutrition,Nutrition (MDD proxy),nutrition_moderate_prev,36,100.0,,,27.21,27.58
+edu_5_14,Education 5–14 yrs,edu_5_14_moderate_prev,36,1.0,,,33.6,33.74
+edu_15_17,Education 15–17 yrs,edu_15_17_moderate_prev,36,1.0,,,37.35,42.54
+health,Health (vaccination),health_moderate_prev,36,10.0,,,89.22,90.33
