@@ -5,15 +5,16 @@ Per-Dimension Child Deprivation Targets (Kyriaki specification)
 Computes individual dimension-level deprivation prevalence per state from
 Nigeria MICS6 microdata, as specified by Kyriaki (May 2026):
 
-| Dimension       | Unit                     | Source            | Thresholds                                      |
-|-----------------|--------------------------|-------------------|-------------------------------------------------|
-| Shelter         | children <17 (hl.sav)   | hh.sav + hl.sav   | moderate ≥3 persons/room; severe ≥5             |
-| Sanitation      | children <17 (hl.sav)   | hh.sav WASH       | moderate improved+shared; severe unimproved     |
-| Water           | children <17 (hl.sav)   | hh.sav WASH       | moderate improved+>30 min; severe unimproved    |
-| Nutrition       | children <5  (ch.sav)   | ch.sav anthro     | moderate HAZ<-2; severe HAZ<-3                  |
-| Education 5–14  | children 5–14 (hl.sav)  | hl.sav education  | moderate not attending; severe never attended   |
-| Education 15–17 | youth 15–17 (hl.sav)    | hl.sav education  | moderate not in secondary; severe <primary      |
-| Health          | children 12–35m (ch.sav) | ch.sav immuniz.  | moderate missing ≥1 vaccine; severe unvaccin.   |
+| Dimension       | Unit                      | Source             | Thresholds                                                   |
+|-----------------|---------------------------|--------------------|--------------------------------------------------------------|
+| Shelter         | children <17 (hl.sav)    | hh.sav + hl.sav    | moderate ≥3 persons/room; severe ≥5                          |
+| Sanitation      | children <17 (hl.sav)    | hh.sav WASH        | moderate improved+shared; severe unimproved                  |
+| Water           | children <17 (hl.sav)    | hh.sav WASH        | moderate improved+>30 min; severe unimproved                 |
+| Nutrition       | children <5  (ch.sav)    | ch.sav anthro      | moderate HAZ<-2; severe HAZ<-3  [PROXY: MDD, see note]       |
+| Education 5–14  | children 5–14 (hl.sav)   | hl.sav education   | moderate not attending; severe never attended                |
+| Education 15–17 | youth 15–17 (hl.sav)     | hl.sav education   | moderate not in secondary; severe <primary                   |
+| Health 12–35m   | children 12–35m (ch.sav) | ch.sav immuniz.    | moderate missing ≥1 vaccine; severe never vaccinated         |
+| Health 36–59m   | children 36–59m (ch.sav) | ch.sav illness/CA  | moderate ARI/fever, no professional care; severe no care     |
 
 Variable mappings (Nigeria MICS6 confirmed from SPSS metadata):
   HC3       — number of rooms used for sleeping  (hh.sav)
@@ -30,13 +31,34 @@ Variable mappings (Nigeria MICS6 confirmed from SPSS metadata):
   IM20      — child ever given Pentavalent       (ch.sav)  1=yes
   IM21      — times received Pentavalent (DPT)  (ch.sav)  1/2/3
   IM26      — child ever given measles vacc.     (ch.sav)  1=yes
+  CA1       — child had diarrhoea in last 2 wks  (ch.sav)  1=yes, 2=no
+  CA5       — sought care for diarrhoea          (ch.sav)  1=yes, 2=no
+  CA14      — child had fever in last 2 wks      (ch.sav)  1=yes, 2=no
+  CA16      — child had cough in last 2 wks      (ch.sav)  1=yes, 2=no
+  CA17      — difficulty breathing during cough  (ch.sav)  1=yes, 2=no  (= ARI proxy)
+  CA20      — sought any care for ARI/fever      (ch.sav)  1=yes, 2=no
+  CA21A/B/C — place sought care: hospital/clinic (ch.sav)  1=yes
+  CA21I/J   — place sought care: private hosp/MD (ch.sav)  1=yes
 
-NOTE on Nutrition:
-  Nigeria MICS6 does NOT include anthropometric z-scores (HAZ/WAZ/WHZ).
-  The fallback is the existing Minimum Dietary Diversity (MDD) proxy used by
-  compute_mics_deprivation.py.  When HAZ becomes available (separate
-  anthropometry round), replace `_compute_nutrition_flags` with the
-  HAZ < −200 threshold (z-scores stored ×100 in MICS standard files).
+NOTE on Nutrition (HAZ):
+  ─────────────────────────────────────────────────────────────────────────────
+  Nigeria MICS6 ch.sav does NOT contain HAZ z-scores in its public release.
+
+  IMPLEMENTED FALLBACK HIERARCHY (in order of scientific quality):
+    1. DHS 2018 HAZ (NGKR7BFL.DAT, hw70 WHO standard)  ← ACTIVE when available
+       State-level stunting targets derived from 11,364 children with valid HAZ.
+       Nigeria DHS 2018 mean HAZ = −1.50; stunting 36.2%; severe 16.5%.
+       Computed by src/scripts/ingest_dhs_haz.py → nga_dhs_haz_targets.csv.
+       Survey timing caveat: DHS 2018 vs MICS 2021 (3-year gap); national
+       stunting trend was slowly declining, so rates are conservative.
+    2. MDD proxy (< 5 of 8 UNICEF food groups from ch.sav BD8* columns)
+       Used only when DHS HAZ file is absent or loading fails.
+       This understates stunting and confounds food diversity with growth.
+
+  Future upgrade: if MICS 2021 anthropometry is released separately by
+  UNICEF Nigeria / NBS, replace with that file.  Code ready:
+      haz_col < -200  (MICS stores z-scores as integer × 100).
+  ─────────────────────────────────────────────────────────────────────────────
 """
 
 import logging
@@ -311,19 +333,74 @@ def compute_health_12_35_flags(ch_df: pd.DataFrame) -> pd.DataFrame:
     })
 
 
+def compute_health_36_59_flags(ch_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Health deprivation for children aged 36–59 months.
+
+    Illness proxy (ARI + fever), care-seeking from a professional provider.
+    Kyriaki specification (May 2026):
+      Sick  = fever last 2 weeks (CA14==1) OR
+               acute respiratory illness: cough (CA16==1) AND difficulty
+               breathing (CA17==1) in last 2 weeks.
+      moderate: sick but did NOT seek professional care.
+                Professional providers = hospital, health centre/clinic,
+                private hospital/clinic, private physician
+                (CA21A, CA21B, CA21C, CA21I, CA21J == 1).
+      severe:   sick but sought NO care at all (CA20 != 1).
+
+    Children who were not sick in the last 2 weeks are flagged as 0 for both.
+    """
+    ch = ch_df.copy()
+    cage = pd.to_numeric(_safe_col(ch, "CAGE"), errors="coerce")
+    mask = (cage >= 36) & (cage < 60)
+
+    ca14 = _safe_col(ch, "CA14").eq(1)   # fever
+    ca16 = _safe_col(ch, "CA16").eq(1)   # cough
+    ca17 = _safe_col(ch, "CA17").eq(1)   # difficulty breathing (ARI)
+    ca20 = _safe_col(ch, "CA20")         # sought any care (1=yes, 2=no)
+
+    # Professional facility codes (CA21A–CA21C public, CA21I–CA21J private)
+    pro_cols = ["CA21A", "CA21B", "CA21C", "CA21I", "CA21J"]
+    saw_professional = pd.Series(False, index=ch.index)
+    for col in pro_cols:
+        saw_professional = saw_professional | _safe_col(ch, col).eq(1)
+
+    sick = ca14 | (ca16 & ca17)
+    any_care = ca20.eq(1)
+
+    mod = (mask & sick & ~(any_care & saw_professional)).fillna(False).astype(int)
+    sev = (mask & sick & ~any_care).fillna(False).astype(int)
+
+    logger.info(
+        "Health 36–59m: sick=%.1f%%, moderate(no-professional-care)=%.1f%%, "
+        "severe(no-care)=%.1f%% of 36–59 month olds",
+        sick[mask].mean() * 100 if mask.any() else 0,
+        mod[mask].mean() * 100 if mask.any() else 0,
+        sev[mask].mean() * 100 if mask.any() else 0,
+    )
+    return pd.DataFrame({
+        "HH1": ch["HH1"],
+        "HH2": ch["HH2"],
+        "HH6": _safe_col(ch, "HH6"),
+        "HH7": _safe_col(ch, "HH7"),
+        "chweight": _safe_col(ch, "chweight"),
+        "cage": cage,
+        "in_group": mask.astype(int),
+        "health_36_59_moderate": mod,
+        "health_36_59_severe": sev,
+    })
+
+
 def compute_nutrition_flags(ch_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Nutrition deprivation for children < 5 years.
+    Nutrition deprivation for children < 5 years — MDD proxy fallback.
 
-    Kyriaki specification: HAZ < −2 moderate, HAZ < −3 severe (ch.sav anthropometry).
-    Nigeria MICS6 LIMITATION: HAZ z-scores are NOT available in the Nigeria MICS6
-    ch.sav file.  The fallback is the Minimum Dietary Diversity (MDD) proxy
-    already used by compute_mics_deprivation.py:
-      - Moderate: consumes < 5 of 8 UNICEF food groups (BD8 columns)
-      - Severe: no dietary diversity data AND never breastfed (BD2 == 2)
+    Used ONLY when DHS HAZ state targets are unavailable (see
+    run_nigeria_dimension_targets for the primary HAZ-based path).
 
-    When HAZ columns become available, replace with:
-        HAZ < -200  (MICS stores z-scores as integer × 100)
+    Minimum Dietary Diversity proxy:
+      - Moderate: < 5 of 8 UNICEF food groups (BD8 columns)
+      - Severe: set to 0 (cannot distinguish without HAZ)
     """
     from src.targets.compute_mics_deprivation import _compute_nutrition_nigeria
 
@@ -334,13 +411,11 @@ def compute_nutrition_flags(ch_df: pd.DataFrame) -> pd.DataFrame:
     dep = _compute_nutrition_nigeria(ch)
 
     mod = (mask & dep.eq(1)).fillna(False).astype(int)
-    # No separate severe threshold available — use same flag (HAZ limitation)
     sev = mod.copy()
     sev[:] = 0  # cannot distinguish moderate/severe without HAZ
 
     logger.info(
-        "Nutrition (<5y, MDD proxy): moderate=%.1f%% of under-5s "
-        "[NOTE: HAZ not available in Nigeria MICS6]",
+        "Nutrition (<5y, MDD proxy FALLBACK): moderate=%.1f%% of under-5s",
         mod[mask].mean() * 100 if mask.any() else 0,
     )
     return pd.DataFrame({
@@ -416,19 +491,20 @@ def compute_kyriaki_dimension_targets(
     state_labels: dict | None = None,
 ) -> pd.DataFrame:
     """
-    Compute per-state prevalence for all 7 Kyriaki dimensions.
+    Compute per-state prevalence for all 8 Kyriaki dimensions.
 
     Returns a DataFrame with columns:
         subregion,
-        shelter_moderate_prev,   shelter_severe_prev,
-        sanitation_moderate_prev, sanitation_severe_prev,
-        water_moderate_prev,     water_severe_prev,
-        nutrition_moderate_prev, nutrition_severe_prev,
-        edu_5_14_moderate_prev,  edu_5_14_severe_prev,
-        edu_15_17_moderate_prev, edu_15_17_severe_prev,
-        health_moderate_prev,    health_severe_prev
+        shelter_moderate_prev,      shelter_severe_prev,
+        sanitation_moderate_prev,   sanitation_severe_prev,
+        water_moderate_prev,        water_severe_prev,
+        nutrition_moderate_prev,    nutrition_severe_prev,
+        edu_5_14_moderate_prev,     edu_5_14_severe_prev,
+        edu_15_17_moderate_prev,    edu_15_17_severe_prev,
+        health_moderate_prev,       health_severe_prev,
+        health_36_59_moderate_prev, health_36_59_severe_prev
     """
-    logger.info("Computing Kyriaki dimension targets...")
+    logger.info("Computing Kyriaki dimension targets (8 dimensions)...")
 
     # ── 1. Household-level dimensions: join flags back to all hl.sav members ──
     shelter_hh = compute_shelter_flags(hh_df, hl_df)
@@ -451,6 +527,7 @@ def compute_kyriaki_dimension_targets(
 
     # ── 3. Child-level dimensions (ch.sav) ──
     health = compute_health_12_35_flags(ch_df)
+    health_36_59 = compute_health_36_59_flags(ch_df)
     nutrition = compute_nutrition_flags(ch_df)
 
     # ── 4. Aggregate each dimension to state level ──
@@ -459,7 +536,8 @@ def compute_kyriaki_dimension_targets(
     all_states = sorted(
         set(hl_merged[state_col].dropna().unique()) |
         set(edu_5_14[state_col].dropna().unique()) |
-        set(health[state_col].dropna().unique())
+        set(health[state_col].dropna().unique()) |
+        set(health_36_59[state_col].dropna().unique())
     )
 
     # Collect per-state rows
@@ -503,6 +581,7 @@ def compute_kyriaki_dimension_targets(
     _fill_dim(edu_5_14, "edu_5_14_moderate", "edu_5_14_severe", "hhweight", "in_group")
     _fill_dim(edu_15_17, "edu_15_17_moderate", "edu_15_17_severe", "hhweight", "in_group")
     _fill_dim(health, "health_moderate", "health_severe", "chweight", "in_group")
+    _fill_dim(health_36_59, "health_36_59_moderate", "health_36_59_severe", "chweight", "in_group")
     _fill_dim(nutrition, "nutrition_moderate", "nutrition_severe", "chweight", "in_group")
 
     targets = pd.DataFrame(list(results.values()))
@@ -523,12 +602,57 @@ def compute_kyriaki_dimension_targets(
     return targets
 
 
+def _load_dhs_haz_targets(cfg: dict) -> "pd.DataFrame | None":
+    """
+    Try to load DHS HAZ state targets.  Returns None if unavailable.
+
+    Looks first for a pre-computed CSV, then runs ingest_dhs_haz if raw
+    DHS KR files are present.
+    """
+    interim_dir = cfg["paths"]["interim_dir"]
+    cached_csv = os.path.join(interim_dir, "nga_dhs_haz_targets.csv")
+
+    if os.path.isfile(cached_csv):
+        df = pd.read_csv(cached_csv)
+        logger.info("DHS HAZ targets loaded from cache: %s (%d states)", cached_csv, len(df))
+        return df
+
+    # Try to compute from raw files
+    dhs_raw_dir = cfg["paths"].get(
+        "dhs_raw_dir",
+        os.path.join(cfg["paths"]["data_dir"], "Nigeria", "dhs", "raw"),
+    )
+    kr_dir  = os.path.join(dhs_raw_dir, "NGKR7BFL")
+    gps_shp = os.path.join(dhs_raw_dir, "NGGE7BFL", "NGGE7BFL.shp")
+
+    if not (os.path.isdir(kr_dir) and os.path.isfile(gps_shp)):
+        logger.warning(
+            "DHS KR files not found at %s — falling back to MDD proxy for nutrition",
+            kr_dir,
+        )
+        return None
+
+    try:
+        from src.scripts.ingest_dhs_haz import compute_haz_state_targets
+        targets = compute_haz_state_targets(kr_dir, gps_shp)
+        os.makedirs(interim_dir, exist_ok=True)
+        targets.to_csv(cached_csv, index=False)
+        logger.info("DHS HAZ targets computed and cached: %s", cached_csv)
+        return targets
+    except Exception as exc:
+        logger.warning("DHS HAZ ingestion failed (%s) — falling back to MDD proxy", exc)
+        return None
+
+
 def run_nigeria_dimension_targets(cfg: dict) -> pd.DataFrame:
     """
-    Entry point: load MICS6 SPSS files and compute all 7 dimension targets.
+    Entry point: load MICS6 SPSS files and compute all 8 dimension targets.
+
+    Nutrition dimension:
+      - Primary:  DHS 2018 HAZ-based stunting (NGKR7BFL.DAT, hw70 WHO)
+      - Fallback: MICS MDD proxy (when DHS KR not available)
 
     Saves `nga_dimension_targets.csv` to `cfg.paths.interim_dir`.
-
     Returns the dimension targets DataFrame.
     """
     try:
@@ -575,6 +699,38 @@ def run_nigeria_dimension_targets(cfg: dict) -> pd.DataFrame:
         logger.info("State labels resolved: %d states", len(state_labels))
 
     targets = compute_kyriaki_dimension_targets(ch_df, hh_df, hl_df, state_labels)
+
+    # ── Replace MDD nutrition with DHS HAZ if available ──────────────────────
+    haz = _load_dhs_haz_targets(cfg)
+    if haz is not None:
+        logger.info(
+            "Replacing MDD nutrition target with DHS 2018 HAZ stunting "
+            "(%d states available).", len(haz)
+        )
+        haz_merge = haz.rename(columns={
+            "haz_moderate_prev": "nutrition_moderate_prev",
+            "haz_severe_prev":   "nutrition_severe_prev",
+            "haz_n":             "nutrition_n",
+        })
+        targets = targets.drop(
+            columns=[c for c in targets.columns if c.startswith("nutrition_")],
+            errors="ignore",
+        )
+        targets = targets.merge(haz_merge, on="subregion", how="left")
+        n_merged = targets["nutrition_moderate_prev"].notna().sum()
+        logger.info(
+            "  HAZ nutrition merged: %d / %d states (mean moderate stunting: %.1f%%)",
+            n_merged, len(targets), targets["nutrition_moderate_prev"].mean(),
+        )
+        if n_merged < len(targets):
+            missing_states = targets.loc[
+                targets["nutrition_moderate_prev"].isna(), "subregion"
+            ].tolist()
+            logger.warning(
+                "  States without HAZ data (NaN nutrition target): %s", missing_states
+            )
+    else:
+        logger.info("Using MDD proxy for nutrition (DHS HAZ not available).")
 
     out_path = os.path.join(
         cfg["paths"]["interim_dir"], "nga_dimension_targets.csv"

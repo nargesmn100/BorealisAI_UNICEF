@@ -28,6 +28,11 @@ paths:
   # MICS6 microdata directory
   mics_data_dir: "Data/Nigeria/Nigeria MICS6 SPSS Datasets"
 
+  # DHS 2018 raw files directory (cluster GPS shapefile + KR flat files)
+  # NGKR7BFL/ contains NGKR7BFL.DAT + .DCT  (Children's Recode — source of hw70 HAZ)
+  # NGGE7BFL/ contains NGGE7BFL.shp          (GPS cluster coordinates)
+  dhs_raw_dir: "Data/Nigeria/dhs/raw"
+
   # Intermediate outputs (all cached — delete to force re-run a step)
   interim_dir:           "Data/interim/nga"
   grid_file:             "Data/interim/nga/nga_base_grid.parquet"
@@ -90,7 +95,20 @@ targets:
 # Modeling settings
 # ---------------------------------------------------------------------------
 modeling:
-  # All 21 features (19 original + 2 GHSL)
+  # 22 non-survey features (geospatial, infrastructure, D1 administrative)
+  # ── LEAKAGE REMOVAL (May 2026) ────────────────────────────────────────────
+  # Dropped from base features (still available in individual dimension
+  # feature_overrides only if they do NOT overlap that dimension's target):
+  #   school_attendance_rate  → direct component of edu_5_14 / edu_15_17 target
+  #   ever_attended_rate      → direct component of edu_5_14 / edu_15_17 target
+  #   public_school_rate      → used in education deprivation scoring
+  #   anc_rate                → overlaps nutrition (maternal) and health targets
+  #   skilled_delivery_rate   → overlaps health 12-35 month target
+  #   facility_delivery_rate  → overlaps health 12-35 month target
+  #   vacc_card_rate          → direct component of health 12-35 month target
+  #   diarrhea_care_rate      → direct component of health 36-59 month target
+  # Replaced by: dist_school_km, dist_health_km, travel_time_*, D1 NBS/NEMIS
+  # ─────────────────────────────────────────────────────────────────────────
   features:
     - "rwi"
     - "population"
@@ -112,14 +130,6 @@ modeling:
     - "rainfall_mm"
     - "ghsl_built_frac"
     - "log_ghsl_built"
-    - "school_attendance_rate"
-    - "ever_attended_rate"
-    - "public_school_rate"
-    - "anc_rate"
-    - "skilled_delivery_rate"
-    - "facility_delivery_rate"
-    - "vacc_card_rate"
-    - "diarrhea_care_rate"
     - "dhs_nearest_dep_index"
     - "dist_km_nearest_dhs_cluster"
     # ── D1 external features (NBS MPI + NEMIS) — added May 2026 ──────────────
@@ -296,10 +306,11 @@ dimensions:
     - shelter
     - sanitation
     - water
-    - nutrition     # NOTE: HAZ not available; MDD proxy used for Nigeria MICS6
+    - nutrition     # NOTE: HAZ not available in Nigeria MICS6; MDD proxy used (see dimension_targets.py)
     - edu_5_14
     - edu_15_17
-    - health
+    - health        # 12-35 months: vaccination card + professional care-seeking
+    - health_36_59  # 36-59 months: ARI (cough+difficult breathing) or fever + professional care-seeking
   output_maps:      true    # generate one Folium HTML per dimension
   output_csv:       true    # nga_dimension_predictions.csv
 
@@ -361,38 +372,48 @@ dimensions:
       - "nbs_water_far_pct"
 
     nutrition:
+      # Target: DHS 2018 HAZ-based stunting (hw70 < -200 = moderate, < -300 = severe).
+      # Stunting is driven by chronic undernutrition — food access, water quality,
+      # disease burden, health system access, and poverty are the main structural drivers.
+      # No MICS survey rates used (leakage removed); replaced with geospatial + D1 signals.
       - "rwi"
       - "smod_class"
       - "is_urban"
       - "population"
       - "rainfall_mm"
       - "dist_health_km"
-      - "anc_rate"
-      - "skilled_delivery_rate"
-      - "facility_delivery_rate"
+      - "travel_time_50k"
+      - "log_travel_time_50k"
       - "dhs_nearest_dep_index"
+      - "dist_km_nearest_dhs_cluster"
       - "conflict_events"
       - "nightlights"
-      # D1 NBS MPI — food security and health access proxies
+      # D1 NBS MPI — food security, water quality, and health access proxies
+      # (all non-survey administrative signals, state-level)
       - "nbs_food_insecure_pct"
       - "nbs_food_severe_pct"
       - "nbs_health_far_pct"
+      - "nbs_water_improved_pct"
+      - "nbs_water_far_pct"
 
     edu_5_14:
+      # NOTE: school_attendance_rate / ever_attended_rate / public_school_rate removed —
+      # they are MICS-derived rates directly measuring the edu_5_14 target (leakage).
+      # Replaced by dist_school_km, travel_time, and D1 NEMIS supply-side indicators.
       - "rwi"
       - "smod_class"
       - "is_urban"
       - "dist_school_km"
-      - "school_attendance_rate"
-      - "ever_attended_rate"
-      - "public_school_rate"
       - "population"
       - "travel_time_cities"
+      - "travel_time_50k"
+      - "log_travel_time_cities"
       - "conflict_events"
       - "conflict_fatalities"
       - "nightlights"
       - "dhs_nearest_dep_index"
-      # D1 NEMIS — system-level school supply features
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NEMIS — system-level school supply features (non-survey)
       - "nemis_primary_schools"
       - "nemis_primary_enrol"
       - "nemis_primary_pupil_per_school"
@@ -400,20 +421,23 @@ dimensions:
       - "nemis_rural_pct"
 
     edu_15_17:
+      # NOTE: school_attendance_rate / ever_attended_rate / public_school_rate removed —
+      # they are MICS-derived rates directly measuring the edu_15_17 target (leakage).
+      # Replaced by dist_school_km, travel_time, and D1 NEMIS supply-side indicators.
       - "rwi"
       - "smod_class"
       - "is_urban"
       - "dist_school_km"
-      - "school_attendance_rate"
-      - "ever_attended_rate"
-      - "public_school_rate"
       - "population"
       - "travel_time_cities"
+      - "travel_time_50k"
+      - "log_travel_time_cities"
       - "conflict_events"
       - "conflict_fatalities"
       - "nightlights"
       - "dhs_nearest_dep_index"
-      # D1 NEMIS — secondary school supply features
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NEMIS — secondary school supply features (non-survey)
       - "nemis_jss_schools"
       - "nemis_sss_schools"
       - "nemis_primary_pupil_per_school"
@@ -421,22 +445,44 @@ dimensions:
       - "nemis_rural_pct"
 
     health:
+      # NOTE: vacc_card_rate / diarrhea_care_rate / anc_rate /
+      # skilled_delivery_rate / facility_delivery_rate removed —
+      # they are MICS-derived rates that directly define the health 12-35 month
+      # target (leakage).  Replaced by dist_health_km, nbs_health_far_pct,
+      # travel_time, and DHS cluster signal.
       - "rwi"
       - "smod_class"
       - "is_urban"
       - "dist_health_km"
-      - "vacc_card_rate"
-      - "diarrhea_care_rate"
-      - "anc_rate"
-      - "skilled_delivery_rate"
-      - "facility_delivery_rate"
       - "population"
       - "travel_time_cities"
       - "travel_time_50k"
+      - "log_travel_time_50k"
       - "conflict_events"
+      - "rainfall_mm"
       - "dhs_nearest_dep_index"
       - "dist_km_nearest_dhs_cluster"
       # D1 NBS MPI — health and sanitation access from official survey
+      - "nbs_health_far_pct"
+      - "nbs_toilet_improved_pct"
+
+    health_36_59:
+      # Health 36-59 months: ARI (cough + difficult breathing) or fever,
+      # care-seeking from a professional provider.
+      # Same non-survey signal set as health 12-35.
+      - "rwi"
+      - "smod_class"
+      - "is_urban"
+      - "dist_health_km"
+      - "population"
+      - "travel_time_cities"
+      - "travel_time_50k"
+      - "log_travel_time_50k"
+      - "conflict_events"
+      - "rainfall_mm"
+      - "dhs_nearest_dep_index"
+      - "dist_km_nearest_dhs_cluster"
+      # D1 NBS MPI — health access proxies
       - "nbs_health_far_pct"
       - "nbs_toilet_improved_pct"
 

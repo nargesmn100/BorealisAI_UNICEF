@@ -2,8 +2,9 @@
 Per-Dimension Deprivation Models
 =================================
 
-Trains a Ridge regression model for each of the 7 Kyriaki dimensions
-(shelter, sanitation, water, nutrition, edu_5_14, edu_15_17, health) and
+Trains a Ridge regression model for each of the 8 Kyriaki dimensions
+(shelter, sanitation, water, nutrition, edu_5_14, edu_15_17, health,
+health_36_59) and
 produces per-cell spatial predictions for Nigeria.
 
 Each dimension uses the same 30 proxy features as the composite pipeline
@@ -57,13 +58,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DIMENSIONS = {
-    "shelter":     {"target_col": "shelter_moderate_prev",     "label": "Shelter (overcrowding)"},
-    "sanitation":  {"target_col": "sanitation_moderate_prev",  "label": "Sanitation access"},
-    "water":       {"target_col": "water_moderate_prev",       "label": "Water access"},
-    "nutrition":   {"target_col": "nutrition_moderate_prev",   "label": "Nutrition (MDD proxy)"},
-    "edu_5_14":    {"target_col": "edu_5_14_moderate_prev",    "label": "Education 5–14 yrs"},
-    "edu_15_17":   {"target_col": "edu_15_17_moderate_prev",   "label": "Education 15–17 yrs"},
-    "health":      {"target_col": "health_moderate_prev",      "label": "Health (vaccination)"},
+    "shelter":      {"target_col": "shelter_moderate_prev",      "label": "Shelter (overcrowding)"},
+    "sanitation":   {"target_col": "sanitation_moderate_prev",   "label": "Sanitation access"},
+    "water":        {"target_col": "water_moderate_prev",        "label": "Water access"},
+    "nutrition":    {"target_col": "nutrition_moderate_prev",    "label": "Nutrition (MDD proxy)"},
+    "edu_5_14":     {"target_col": "edu_5_14_moderate_prev",     "label": "Education 5–14 yrs"},
+    "edu_15_17":    {"target_col": "edu_15_17_moderate_prev",    "label": "Education 15–17 yrs"},
+    "health":       {"target_col": "health_moderate_prev",       "label": "Health 12–35m (vaccination)"},
+    "health_36_59": {"target_col": "health_36_59_moderate_prev", "label": "Health 36–59m (ARI + care)"},
 }
 
 
@@ -219,9 +221,12 @@ def _make_folium_map(
 
     sample_df = df.dropna(subset=[pred_col, "latitude", "longitude"])
     if len(sample_df) > sample_n:
+        n_per_zone = sample_n // sample_df["subregion"].nunique()
         sample_df = (
             sample_df.groupby("subregion", group_keys=False)
-            .apply(lambda g: g.sample(min(len(g), max(1, sample_n // sample_df["subregion"].nunique())), random_state=42))
+            .apply(lambda g: g.sample(min(len(g), max(1, n_per_zone)), random_state=42),
+                   include_groups=False)
+            .reset_index(drop=True)
         )
 
     vmin, vmax = float(sample_df[pred_col].quantile(0.02)), float(sample_df[pred_col].quantile(0.98))

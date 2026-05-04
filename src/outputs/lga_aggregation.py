@@ -44,7 +44,7 @@ _PRED_COLS = [
 _DIMENSION_COLS = [
     "shelter_moderate", "sanitation_moderate", "water_moderate",
     "nutrition_moderate", "edu_5_14_moderate", "edu_15_17_moderate",
-    "health_moderate",
+    "health_moderate", "health_36_59_moderate",
 ]
 
 

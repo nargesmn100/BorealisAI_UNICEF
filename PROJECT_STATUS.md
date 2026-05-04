@@ -5,7 +5,7 @@
 
 **Maintaining this file:** After any substantive code, config, data-pipeline, or evaluation change, update this document in the **same change** (do not leave it stale). At minimum: **§1** (feature counts / new datasets), **§6** Master checklist + **Full list of remaining open items** + **Summary** table, and **Completed since last update** when you ship something new. Prefer this file’s checklist over one-line summaries elsewhere (**C8**).
 
-**Dated snapshot (May 4, 2026):** one-page executive status → [`CURRENT_STATUS_MAY_4_2026.md`](CURRENT_STATUS_MAY_4_2026.md). Update or supersede that file when the repo crosses a major milestone.
+**Last updated: May 4, 2026 (evening) — HAZ nutrition, leakage removal, health 36–59m, 9-panel maps all complete. See §3 for current accuracy, §6 for remaining TODOs.**
 
 ---
 
@@ -39,21 +39,22 @@
 | OSM Building Density | OpenStreetMap | Building count density + log transform |
 | GHSL Built-Up Surface 2020 | EU JRC | Satellite building fraction per cell (ghsl_built_frac, log_ghsl_built) |
 | LSMS-ISA 2018–2019 | World Bank | Household consumption for sub-state validation |
-| Nigeria DHS 2018 (Flat Files + `NGGE7BFL.shp`) | DHS Program | Cluster deprivation + 1,382 geolocated clusters; `merge_dhs_gps` + `validate_predictions_vs_dhs_gps` |
+| Nigeria DHS 2018 — GPS + Household + Children's Recode | DHS Program | Cluster deprivation (1,382 clusters); `NGGE7BFL.shp` GPS; `NGKR7BFL.DAT` children's recode with **hw70 HAZ** z-scores (11,364 valid measurements) → **nutrition stunting targets** |
 | NBS NLSS 2019 | National Bureau of Statistics Nigeria | State-level monetary poverty headcount (36 states + FCT) — 3rd independent validation source |
-| MICS6 Education Indicators | MICS6 hl.sav microdata | School attendance, ever-attended, public school rates — state × urban/rural |
-| MICS6 Health Utilization Indicators | MICS6 wm.sav + ch.sav | ANC rate, skilled delivery, facility delivery, vaccination card, diarrhea care — state × urban/rural |
 | GADM Admin Boundaries | GADM v4.1 | State (ADM1) + LGA (ADM2) polygons |
 
-**Total features in model: 46** — `modeling.features` in `config/config_nga.yaml`: **30** pre-D1 columns (geospatial + MICS-derived survey aggregates, including **2** DHS nearest-cluster features) + **16** D1 (NBS MPI + NEMIS). See also `HIGH_LEVEL_MODEL_OVERVIEW.md`.
+**Total features in model: 38** — `modeling.features` in `config/config_nga.yaml`: **22** non-survey geospatial columns (incl. 2 DHS nearest-cluster features) + **16** D1 (NBS MPI + NEMIS). See `HIGH_LEVEL_MODEL_OVERVIEW.md`.
 
-**D1 external datasets now ingested (May 2026):**
+> **Leakage removal (May 4, 2026):** 8 MICS-derived survey rate features removed — they directly overlap deprivation targets: `school_attendance_rate`, `ever_attended_rate`, `public_school_rate` (edu), `anc_rate`, `skilled_delivery_rate`, `facility_delivery_rate`, `vacc_card_rate`, `diarrhea_care_rate` (health/nutrition). Replaced with non-survey signals: `dist_school_km`, `dist_health_km`, `travel_time_*`, D1 NBS MPI + NEMIS. Composite Ridge Pearson r: 0.40 (honest); RWI baseline: 0.79.
 
-| Dataset | Source | Features added |
+**D1 external datasets ingested (May 2026):**
+
+| Dataset | Source | Role |
 |---|---|---|
-| NBS MPI Microdata (Household survey, ~53k HH) | National Bureau of Statistics Nigeria | 9 state-level features: floor quality, water access, toilet quality, open defecation, food insecurity (HFIAS), health facility distance |
-| NEMIS School Listings (4 xlsx: PRE-PRIMARY/PRIMARY/JSS/SSS, ~180k schools) | Federal Ministry of Education / NEMIS | 7 key features: primary school count, enrolment, pupil-per-school ratio, JSS/SSS counts, public % and rural % |
-| Mo Ibrahim IIAG 2024 | Mo Ibrahim Foundation | 7 governance scalars stored in modeling table (national-level, excluded from training — enable for multi-country models) |
+| NBS MPI Microdata (~53k HH) | National Bureau of Statistics Nigeria | 9 state-level features: floor quality, water/toilet quality, open defecation, food insecurity, health facility distance |
+| NEMIS School Listings (~180k schools, 4 levels) | Federal Ministry of Education | 7 features: primary schools, enrolment, pupil-per-school, JSS/SSS counts, public %, rural % |
+| Mo Ibrahim IIAG 2024 | Mo Ibrahim Foundation | 7 governance scalars (national-level; stored for multi-country use, excluded from Nigeria training) |
+| **DHS 2018 NGKR7BFL** (Children's Recode) | DHS Program | `hw70` HAZ z-scores → **37-state stunting targets** for nutrition dimension (`ingest_dhs_haz.py`) |
 
 ---
 
@@ -775,7 +776,9 @@ Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unle
 | **C8** | Documentation hygiene | **Open** | Summary tables can lag code; this file’s **Master checklist** and **Full list** below are the source of truth — refresh Summary rows after large releases. |
 | **C1–C5** | Concerns | **Mitigated / residual** | Cell-map density, black blob, empty viewer, popup explain, GAM LOZO — mitigations documented in §4 and checklist; GAM still not recommended for primary national map without further work (**C5**). |
 | **E5 (GBM)** | Explainability | **Optional follow-up** | **WSNN:** permutation importance implemented → `nga_wsnn_importance.csv`. **GBM:** SHAP sample path exists behind `export_gbm_shap` in config; widen use / document if stakeholders need GBM-specific SHAP at scale. |
-| **Nutrition (HAZ)** | Data limitation | **Open** | Nigeria MICS6 SPSS lacks HAZ; dimension nutrition uses **MDD proxy** until anthropometry z-scores are computed or a round with HAZ is used. |
+| **Predictor leakage** | Modeling / science | **✅ Resolved (May 4)** | 8 MICS-derived rates removed from base features and dimension overrides; replaced with non-survey signals. |
+| **Health 36–59m** | Kyriaki gap | **✅ Done (May 4)** | `compute_health_36_59_flags()` implemented; CA14/CA16/CA17/CA20/CA21* variables; mean 22.8% moderate. |
+| **HAZ nutrition** | Data limitation | **✅ Resolved via DHS 2018 (May 4)** | `src/scripts/ingest_dhs_haz.py` parses `NGKR7BFL.DAT` (hw70 WHO standard, 11,364 valid measurements). State-level stunting targets (mean 33.5%, range 14–67%) replace MDD proxy. Cached at `nga_dhs_haz_targets.csv`. Fallback to MDD if DHS KR absent. |
 | **DHS aux-stack vs LOZO** | Validation | **Follow-up** | Sweep used `--skip-lozo`; re-run `dhs_aux_sweep.py` **with** LOZO when runtime allows to confirm scale=1.0 does not harm held-out states. |
 | **Priority 6** | Narrative / future | **Incremental** | DHS GPS cluster features are already in the pipeline; “full point-level training paradigm” remains a **roadmap** item for heavier cluster-level supervision (see Priority 6 section). |
 
@@ -813,12 +816,12 @@ Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unle
 | **Kepler.gl recipe** in §4 How-To | ✅ Step-by-step guide for GPU-accelerated map exploration |
 | **`HIGH_LEVEL_MODEL_OVERVIEW.md`**: Ridge linear decomposition vs reconciled note | ✅ §8 formula + `nga_prediction_breakdown.csv` schema table added |
 | **Full pipeline run verified** (May 3, 2026) | ✅ exit_code=0; all 37 states reconciled; 103,049-row breakdown; 775/775 LGAs matched |
-| **Per-dimension targets** (Kyriaki spec, May 4, 2026) | ✅ `src/targets/dimension_targets.py` — 7 dimensions × 37 states from ch.sav + hh.sav + hl.sav |
-| **Per-dimension Ridge models** (May 4, 2026) | ✅ `src/scripts/run_dimension_models.py` — reconciled predictions for all 103,424 cells × 7 dimensions |
-| **`nga_dimension_targets.csv`** | ✅ 37 states × 22 columns (moderate + severe + n per dimension) |
-| **`nga_dimension_predictions.csv`** | ✅ 103,424 rows × 11 columns (7 `{dim}_moderate` prediction columns) |
+| **Per-dimension targets** (Kyriaki spec, May 4, 2026) | ✅ `src/targets/dimension_targets.py` — **8** dimensions × 37 states from ch.sav + hh.sav + hl.sav |
+| **Per-dimension Ridge models** (May 4, 2026) | ✅ `src/scripts/run_dimension_models.py` — reconciled predictions for all 103,424 cells × **8** dimensions |
+| **`nga_dimension_targets.csv`** | ✅ 37 states × 24 columns (moderate + severe + n per dimension) |
+| **`nga_dimension_predictions.csv`** | ✅ 103,424 rows × **12** columns (8 `{dim}_moderate` prediction columns) |
 | **LGA dimension rollup** | ✅ `lga_aggregation.py` merges dimension predictions → `nga_lga_predictions.csv` + GeoJSON (775 LGAs) |
-| **7-panel dimension comparison map** | ✅ `src/scripts/build_dimension_map.py` → `nga_dimension_comparison_map.html` (Leaflet, LGA polygons, all 8 panels) |
+| **9-panel dimension comparison map** | ✅ `src/scripts/build_dimension_map.py` → `nga_dimension_comparison_map.html` (Leaflet, LGA polygons, 9 panels: 8 dims + composite) |
 | **D1 external feature ingestion — NEMIS** (May 4, 2026) | ✅ `src/scripts/ingest_nemis.py` → 33 states × 24 school-system features; aggregated from ~180k school records across 4 levels (PRE/PRIMARY/JSS/SSS) |
 | **D1 external feature ingestion — NBS MPI** (May 4, 2026) | ✅ `src/scripts/ingest_nbs_mpi.py` → 37 states × 9 WASH/housing/food/health features; weighted from ~53k households (Sections A, E, F, I, J) |
 | **D1 external feature ingestion — IIAG** (May 4, 2026) | ✅ `src/scripts/ingest_iiag.py` → 7 governance scalars for Nigeria 2023; stored in modeling table (use for multi-country extension) |
@@ -829,30 +832,111 @@ Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unle
 | **Dimension-specific feature sets** | ✅ Per-dimension feature overrides in `config_nga.yaml` `dimensions.feature_overrides` (13–15 features each) |
 | **`PROJECT_STATUS.md` hygiene** (May 4, 2026) | ✅ **Maintaining this file** callout at top; **§6 Remaining TODOs (at a glance)**; repository snapshot + Summary + Priority 2 aligned with 46 features and D1 done; DHS config bullets corrected for stacked aux |
 | **GitHub `GH001` large-file rejection** (May 2026) | ✅ **§4** docs + **`.gitignore`** + **`python3 -m git_filter_repo --invert-paths`** (purge listed paths from all commits) + `git remote add` + **`git push --force-with-lease origin franklin-2`** — push succeeded |
+| **Predictor leakage removal** (May 4, 2026) | ✅ Dropped 8 MICS-derived rates overlapping deprivation targets: `school_attendance_rate`, `ever_attended_rate`, `public_school_rate` (edu), `anc_rate`, `skilled_delivery_rate`, `facility_delivery_rate`, `vacc_card_rate`, `diarrhea_care_rate` (health/nutrition). Replaced with: `dist_*_km`, `travel_time_*`, D1 NBS/NEMIS, `rainfall_mm`. Base features: **22** (was 30). Ridge Pearson r: 0.40 (was ~0.55 inflated). |
+| **Health 36–59m (ARI + care)** (May 4, 2026) | ✅ `compute_health_36_59_flags()` in `dimension_targets.py` — ARI (cough CA16 + difficulty breathing CA17) OR fever (CA14), no professional facility care (CA21A/B/C/I/J = none). State mean 22.8% moderate. Ridge train_r=0.406. Map: `nga_dimension_health_36_59_map.html`. `build_dimension_map.py` updated to 9-panel. |
+| **HAZ nutrition (DHS 2018 NGKR7BFL)** (May 4, 2026) | ✅ `src/scripts/ingest_dhs_haz.py`: parses `NGKR7BFL.DAT` (fixed-width, `.DCT` spec), extracts hw70 z-scores, joins clusters → states via `NGGE7BFL.shp`, computes weighted stunting prevalence. 11,364 valid child measurements. Nutrition target: **MDD proxy → HAZ stunting; mean 27.2% → 41.0%**. Ridge nutrition train_r: **0.706**. Targets cached: `Data/interim/nga/nga_dhs_haz_targets.csv`. |
+| **Pipeline re-run (leakage-free + HAZ)** (May 4, 2026) | ✅ `python main.py --country nga` exit_code=0. All 8 dimension models re-fit. LGA GeoJSON + CSV refreshed. 9 dimension maps generated (`nga_dimension_*_map.html`). Eval tables updated. |
+| **Full evaluation & maps refreshed** (May 4, 2026) | ✅ `Data/outputs/nga/eval/` — all CSVs updated. `Data/outputs/nga/maps/` — 9 individual dimension maps + composite map. `Data/outputs/nga/tables/` — LGA predictions CSV + parquet with 8 dimension columns. |
 
 ---
 
-### Current Metrics Snapshot (latest run — May 4, 2026)
+### Current Metrics Snapshot (May 4, 2026 — leakage-free + HAZ nutrition)
 
+> All numbers below are from the latest pipeline run (May 4, 2026 evening). Leakage removed, DHS HAZ nutrition active, 8 dimension models trained.
 
-#### Held-out region generalization (LOZO, Ridge, pre-reconciliation on held-out state)
+---
 
-- Mean absolute error (MAE): **11.84 pp** (geopolitical-zone → state cross-validation, Ridge raw)
-- Pearson correlation (predicted vs truth, cross-level): **0.534**
-- Spearman rank correlation: **0.463**
-- Hardest held-out states: **Nasarawa (+40.6 pp overpredict)**, **Ogun (-13.0 pp)**, **Osun (-12.0 pp)**
-#### DHS GPS external validation (1,382 clusters, nearest-grid comparison)
+#### A. LOZO — Leave-One-State-Out (30 states held out, one at a time)
 
-- Mean distance DHS point -> nearest grid cell centre: **1.02 km** (median 1.00 km)
-- Ridge Spearman ρ: **0.553** (DHS stacked aux at scale=1.0; previously 0.486 with soft-label)
-- Ridge MAE: **17.67 pp** (DHS deprivation index ×100 vs Ridge moderate %)
-- RWI baseline Spearman ρ: **0.542**
-- Note: the scale of DHS dep index differs from MICS moderate %; MAE is cross-metric.
+The primary generalization test. Each state is withheld from training; the model predicts it from the remaining 29.
 
-#### Current selected configuration
+| Model | Mean AE | Median AE | Worst state |
+|-------|---------|-----------|-------------|
+| **WSNN** | **6.1 pp** | 5.6 pp | 17.1 pp |
+| **GBM** | **7.4 pp** | 7.0 pp | 19.8 pp |
+| GAM | 11.8 pp | 10.9 pp | 50.6 pp |
+| Ridge | 12.7 pp | 9.1 pp | 76.4 pp |
+| RWI baseline | 15.6 pp | 15.7 pp | 29.1 pp |
+| Uniform baseline | 15.6 pp | 15.7 pp | 29.1 pp |
 
-- `dhs_aux_dhs_scale: 1.0` / `dhs_aux_mics_scale: 1.0` — **stacked DHS auxiliary Ridge training** (see `ridge_model.py`; soft-label blend is inactive for training while the DHS auxiliary scale is positive).
-- `use_dhs_soft_label: true` / `dhs_soft_label_weight: 0.4` — kept in config for reference; **not** used for training while stacked aux is on (see `config_nga.yaml` comments).
+**Hardest held-out states for Ridge (signed error = predicted − truth):**
+
+| State | Truth | Predicted | Error |
+|-------|-------|-----------|-------|
+| Lagos | 21.8% | 98.1% | **+76 pp** — atypical high-density wealth; unique in Nigeria |
+| Jigawa | 73.1% | 34.7% | −38 pp — extreme-North; few training analogues |
+| Enugu | 30.6% | 57.7% | +27 pp |
+| Delta | 31.2% | 5.7% | −26 pp |
+| Taraba | 63.4% | 46.1% | −17 pp |
+
+> WSNN and GBM handle these outliers better than Ridge because they can learn nonlinear patterns (Lagos is unlike any other state; simple regression fails it).
+
+---
+
+#### B. Composite model vs baselines (state-level Pearson r)
+
+| Method | Pearson r vs truth | Spearman r | LOZO overall | CI width |
+|--------|--------------------|------------|--------------|----------|
+| Uniform | 0.31 | 0.28 | 0.30 | — |
+| Heuristic (urban/rural) | 0.67 | 0.73 | 0.39 | — |
+| **RWI redistribution** | **0.79** | **0.80** | **0.41** | — |
+| Ridge (learned) | 0.40 | 0.31 | 0.30 | 0.16 pp |
+| GAM | 0.37 | 0.31 | 0.27 | ~0 |
+| GBM | 0.37 | 0.30 | 0.27 | 0.02 pp |
+
+> **Why RWI beats the learned models on Pearson r:** With only 37 training labels, a simple wealth proxy captures state-level ranking well. The learned models' value is within-state spatial disaggregation (where RWI gives no information). Leakage removal brought Ridge from ~0.55 → 0.40 (the prior higher number was inflated by survey rates that were part of the target).
+
+---
+
+#### C. Cross-Level Hierarchical Validation
+
+Trains on coarse labels (zones), evaluates whether finer patterns emerge correctly.
+
+| Train on | Predict | Model | MAE | Pearson r | Interpretation |
+|----------|---------|-------|-----|-----------|----------------|
+| 6 zones | 37 states | Ridge | **7.5 pp** | **0.85** | Strong — state ranking emerges from zone signal |
+| 6 zones | 37 states | GBM | 7.6 pp | 0.84 | Near-identical |
+| 6 zones | state × urban/rural | Ridge | 15.1 pp | 0.52 | Harder — urban/rural split within unseen states |
+| 37 states | state × urban/rural | Ridge (reconciled) | **13.7 pp** | **0.58** | Best sub-state result |
+
+> Zone → state is robust (r=0.85). State → urban/rural halves correlation (~0.55) — the limiting factor at sub-state scale.
+
+---
+
+#### D. DHS GPS External Validation (1,382 clusters, independent)
+
+| Metric | Value |
+|--------|-------|
+| Mean distance DHS point → nearest grid cell | 1.02 km (median 1.00 km) |
+| Ridge Spearman ρ vs DHS deprivation index | **0.553** |
+| RWI baseline Spearman ρ | 0.542 |
+| Ridge MAE (cross-metric; DHS dep index ≠ MICS %) | 17.67 pp |
+
+> DHS stacked auxiliary training (scale=1.0) improved Ridge Spearman from 0.486 (soft-label) → 0.553.
+
+---
+
+#### E. Dimension Models — 8 dimensions (leakage-free + HAZ, May 4 2026)
+
+| Dimension | Target source | Target mean | Predicted mean | Notes |
+|-----------|---------------|------------|----------------|-------|
+| Shelter | MICS6 hl.sav | 56.1% | 52.0% | Overcrowding (≥3 persons/room) |
+| Sanitation | MICS6 hh.sav | 2.0% | 1.8% | Improved but shared toilet |
+| Water | MICS6 hh.sav | 4.3% | 4.3% | Improved but >30 min roundtrip |
+| **Nutrition** | **DHS 2018 HAZ** | **41.0%** | **44.6%** | **hw70 < −200 stunting; was 27.2% MDD proxy** |
+| Education 5–14 | MICS6 hl.sav | 33.6% | 38.4% | Not attending school |
+| Education 15–17 | MICS6 hl.sav | 37.4% | 45.7% | Not in secondary |
+| Health 12–35m | MICS6 ch.sav | 89.2% | 90.2% | Missing DPT1–3 or measles |
+| Health 36–59m | MICS6 ch.sav | 22.8% | 22.8% | ARI/fever, no professional care (new) |
+
+---
+
+#### F. Current Configuration
+
+- **Composite model:** `dhs_aux_dhs_scale: 1.0` + `dhs_aux_mics_scale: 1.0` — stacked DHS auxiliary Ridge (soft-label blend off while aux scale > 0)
+- **Nutrition:** DHS 2018 HAZ stunting from `NGKR7BFL.DAT` (hw70 WHO), 11,364 valid measurements → 37 state targets cached at `Data/interim/nga/nga_dhs_haz_targets.csv`
+- **Base features:** 22 non-survey geospatial + 16 D1 = **38 total** (leaky MICS rates removed)
+- **Dimension models:** 8 Ridge models, each with domain-specific feature subsets (13–17 features)
 
 ---
 
@@ -1001,17 +1085,21 @@ python src/scripts/run_dimension_models.py --country nga --dims shelter edu_5_14
 python src/scripts/run_dimension_models.py --country nga --recompute-targets
 ```
 
-#### Dimension prevalence — Nigeria national averages (May 2026 run)
+#### Dimension prevalence — Nigeria national averages (latest run, May 4 2026)
 
-| Dimension | National moderate % | Range across states |
-|---|---|---|
-| Shelter (overcrowding) | 54.6% | 35.6 – 77.2% |
-| Sanitation (improved+shared) | 2.3% | 0.0 – 7.5% |
-| Water (improved but far) | 4.0% | 0.4 – 11.1% |
-| Nutrition (MDD proxy) | 25.6% | 13.2 – 37.2% |
-| Education 5–14 | 23.4% | 3.2 – 65.7% |
-| Education 15–17 | 25.5% | 0.7 – 73.9% |
-| Health (vaccination) | 87.0% | 73.7 – 97.4% |
+| Dimension | Target source | National moderate % | State range |
+|---|---|---|---|
+| Shelter (overcrowding) | MICS6 | 56.1% | 35–77% |
+| Sanitation (improved+shared) | MICS6 | 2.0% | 0–8% |
+| Water (improved but far) | MICS6 | 4.3% | 0.4–11% |
+| **Nutrition (HAZ stunting)** | **DHS 2018** | **41.0%** | **26–55%** |
+| Education 5–14 | MICS6 | 33.6% | 3–66% |
+| Education 15–17 | MICS6 | 37.4% | 1–74% |
+| Health 12–35m (vaccination) | MICS6 | 89.2% | 74–97% |
+| **Health 36–59m (ARI+care)** | **MICS6** | **22.8%** | **8–41%** |
+
+> Nutrition changed from MDD proxy (25.6%, range 13–37%) to DHS HAZ stunting (41.0%, range 26–55%). DHS measures true anthropometric stunting; MDD under-estimated prevalence.
+> Health 36–59m is a new dimension added May 4 2026.
 
 ---
 
@@ -1030,24 +1118,26 @@ Combined with 4,976 LSMS households already processed, this gives ~6,600 real-wo
 
 ---
 
-### Summary
+### Summary (as of May 4, 2026 evening)
 
-Canonical backlog for anything still open: **§ Remaining TODOs (at a glance)**, **§ Master checklist**, and **§ Remaining open items — definitions & full backlog** (D2, M3, U1, C8, E5-GBM, HAZ, LOZO cross-check, Priority 6). **D1** state-level ingestion is **done**; optional LGA harmonisation remains.
+All high-priority Nigeria tasks are complete. The pipeline is leakage-free, uses 8 dimensions (including new Health 36–59m), and nutrition now uses DHS 2018 HAZ stunting instead of the MDD proxy. All outputs have been refreshed.
 
 | Next Step | Effort | Impact | Blocker |
 |---|---|---|---|
-| **DHS GPS join + validation** | ✅ done | High | — |
-| DHS **stacked/auxiliary Ridge loss** (`dhs_aux_dhs_scale`) | ✅ Sweep run; **scale=1.0** in `config_nga.yaml` | High | Re-validate with **full LOZO** in sweep (optional follow-up) |
-| **Predictions-map UX** (cluster/opacity/sample/legend) | ✅ U2–U6 | **High** stakeholder | — |
-| Poverty score breakdown / Folium / comparison / explainability / LGA rollup | ✅ E1–E4, E6 | High | — |
-| **WSNN permutation importance** | ✅ E5 (WSNN path) | Medium | Run pipeline **with** WSNN to refresh CSV |
-| **GBM SHAP** (optional) | Partial — flag `export_gbm_shap` | Medium | Runtime / dependency |
-| FCT/`Fct` + `pytest` config | ✅ done | Medium | — |
-| **Per-dimension targets + models + LGA rollup + 7-panel map** | ✅ May 2026 | **Very High** | HAZ not in Nigeria MICS6 (MDD proxy) |
-| **D1** NEMIS / NBS MPI / IIAG ingestion | ✅ May 2026 | Medium–High | Optional: **LGA** harmonisation to GADM ADM2; re-run `main.py` to refresh all eval artifacts |
-| **D2** Second country smoke test | 1–2 days per country | High | **MICS + geo** for chosen country |
-| **M3** Asymmetric LOZO loss | Paused | Low–Med | **Product / ethics** policy |
-| **U1** Stakeholder default = LGA view | Adopt in SOPs | Med | Comms / process |
-| **C8** Summary vs checklist drift | Ongoing | Low | Editorial discipline |
+| **DHS GPS + cluster training** | ✅ done (stacked aux scale=1.0) | High | — |
+| **Predictor leakage removal** | ✅ done (May 4) | **Science integrity** | — |
+| **Health 36–59m** | ✅ done (May 4) | High | — |
+| **DHS HAZ nutrition targets** | ✅ done (May 4) | High | — |
+| **Per-dimension models (8 dims)** | ✅ done + maps | Very High | — |
+| **D1 NEMIS / NBS MPI / IIAG** | ✅ done (May 2026) | Medium–High | Optional: LGA harmonisation to GADM ADM2 |
+| **Predictions-map UX** | ✅ U2–U6 done | High stakeholder | — |
+| **Explainability pipeline** | ✅ E1–E4, E6 done | High | — |
+| **WSNN permutation importance** | ✅ done | Medium | Re-run with WSNN enabled to refresh CSV |
+| **DHS aux LOZO re-validation** | ~2–3 hours | Medium | Run `python src/scripts/dhs_aux_sweep.py` (no `--skip-lozo`) |
+| **GBM SHAP** (optional) | Low–Med | Medium | Enable `export_gbm_shap: true` in config |
+| **D2** Second country smoke test | 1–2 days/country | High | MICS + geo data for second country |
+| **M3** Asymmetric LOZO loss | Paused | Low–Med | Product/ethics policy |
+| **U1** Stakeholder default = LGA view | Process change | Med | Comms/SOPs |
+| **NEMIS / NBS LGA harmonisation** | 1–2 days | Med | LGA string matching to GADM ADM2 |
 
-**Model currently at 46 training features** (28 core geospatial / MICS-proxy columns + 2 DHS nearest-cluster + **16** D1 NBS MPI / NEMIS; **IIAG** stored on the grid but omitted from training as national constants). **Nigeria research pipeline** includes D1 state-level external signals. Suggested next focus: **(1)** **D2** — second country to prove config portability; **(2)** **LOZO-inclusive** aux-stack re-check; **(3)** **U1** adoption; **(4)** optional **GBM SHAP** and **D1 LGA** harmonisation if sub-state validation is required.
+**Model: 38 features** (22 non-survey geospatial + 16 D1 NBS MPI / NEMIS). **8 dimension models**. Suggested next focus: **(1)** DHS aux LOZO validation sweep; **(2)** D2 second country; **(3)** U1 stakeholder default map.

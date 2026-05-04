@@ -48,26 +48,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 PANELS = [
-    {"col": "shelter_moderate",     "title": "Shelter",           "subtitle": "≥3 persons / sleeping room"},
-    {"col": "sanitation_moderate",  "title": "Sanitation",        "subtitle": "Improved but shared toilet"},
-    {"col": "water_moderate",       "title": "Water",             "subtitle": "Improved but >30 min roundtrip"},
-    {"col": "nutrition_moderate",   "title": "Nutrition",         "subtitle": "MDD proxy (HAZ not avail.)"},
-    {"col": "edu_5_14_moderate",    "title": "Education 5–14",    "subtitle": "Not currently attending school"},
-    {"col": "edu_15_17_moderate",   "title": "Education 15–17",   "subtitle": "Not in secondary / no sec. completion"},
-    {"col": "health_moderate",      "title": "Health",            "subtitle": "Missing DPT1–3 or measles vaccine"},
-    {"col": "ridge_moderate",       "title": "Composite (Ridge)", "subtitle": "Composite moderate deprivation (all dims)"},
+    {"col": "shelter_moderate",       "title": "Shelter",              "subtitle": "≥3 persons / sleeping room"},
+    {"col": "sanitation_moderate",    "title": "Sanitation",           "subtitle": "Improved but shared toilet"},
+    {"col": "water_moderate",         "title": "Water",                "subtitle": "Improved but >30 min roundtrip"},
+    {"col": "nutrition_moderate",     "title": "Nutrition",            "subtitle": "MDD proxy (HAZ not avail.)"},
+    {"col": "edu_5_14_moderate",      "title": "Education 5–14",       "subtitle": "Not currently attending school"},
+    {"col": "edu_15_17_moderate",     "title": "Education 15–17",      "subtitle": "Not in secondary / no sec. completion"},
+    {"col": "health_moderate",        "title": "Health 12–35m",        "subtitle": "Missing DPT1–3 or measles vaccine"},
+    {"col": "health_36_59_moderate",  "title": "Health 36–59m",        "subtitle": "ARI/fever, no professional care-seeking"},
+    {"col": "ridge_moderate",         "title": "Composite (Ridge)",    "subtitle": "Composite moderate deprivation (all dims)"},
 ]
 
 # Colour scheme per panel (index → CSS gradient end colour)
 PANEL_COLOURS = [
-    "#7b2d8b",  # shelter  — purple
-    "#1a6632",  # sanitation — dark green
-    "#1565c0",  # water     — dark blue
-    "#e65100",  # nutrition — deep orange
-    "#b71c1c",  # edu 5-14  — dark red
-    "#880e4f",  # edu 15-17 — dark pink
-    "#006064",  # health    — dark teal
-    "#37474f",  # composite — dark grey
+    "#7b2d8b",  # shelter      — purple
+    "#1a6632",  # sanitation   — dark green
+    "#1565c0",  # water        — dark blue
+    "#e65100",  # nutrition    — deep orange
+    "#b71c1c",  # edu 5-14     — dark red
+    "#880e4f",  # edu 15-17    — dark pink
+    "#006064",  # health 12-35 — dark teal
+    "#004d40",  # health 36-59 — dark green-teal
+    "#37474f",  # composite    — dark grey
 ]
 
 
