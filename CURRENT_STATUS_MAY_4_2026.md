@@ -112,6 +112,12 @@ Training / prediction helper: `src/scripts/run_dimension_models.py` → `Data/ou
 
 ---
 
+## Git / GitHub — large files (`GH001`)
+
+A push to GitHub was **rejected** when commits contained generated maps and CSVs over **100 MB** (and NBS MPI `.dta` files over that limit). See **`PROJECT_STATUS.md` §4 — “GitHub push limits — GH001”** for the exact file list, limits, and recovery commands. **`.gitignore`** excludes the named full-grid Folium HTML files, the two large prediction CSVs, and all NBS MPI `*.dta` under that survey folder; prefer **Parquet** tables and **`_sample.html`** maps for anything that must live in Git.
+
+---
+
 ## Where to read more
 
 | Document | Purpose |

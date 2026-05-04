@@ -14,7 +14,7 @@
 1. [What Has Been Built](#1-what-has-been-built)
 2. [How the Model Works](#2-how-the-model-works) — including how a cell gets its score and what we can/cannot know
 3. [Current Model Performance](#3-current-model-performance) — LOZO full results, permutation test, hierarchical validation
-4. [How to Test It](#4-how-to-test-it)
+4. [How to Test It](#4-how-to-test-it) — includes **GitHub `GH001` large-file push rejection** (May 2026)
 5. [All Outputs](#5-all-outputs)
 6. [Next Steps](#6-next-steps) — **remaining TODOs at a glance**, priorities, master checklist, **remaining open items (D2, M3, full backlog)**
 
@@ -389,6 +389,40 @@ GAM achieves reasonable in-sample fit but has a critical flaw in LOZO: when a hi
 
 ## 4. How to Test It
 
+### GitHub push limits — `GH001` large files (May 2026)
+
+Pushing branch `franklin-2` to `https://github.com/nargesmn100/BorealisAI_UNICEF.git` was **rejected by GitHub** (`remote: error: GH001: Large files detected`) because several tracked files exceed GitHub’s **100 MB hard limit** (and some exceed the **50 MB** “warning” threshold).
+
+**Files named in the remote hook (representative sizes from the failed push):**
+
+| Path | Approx. size | GitHub |
+|------|----------------:|--------|
+| `Data/outputs/nga/maps/nga_predictions_map.html` | ~140 MB | **Blocked** (>100 MB) |
+| `Data/outputs/nga/maps/nga_uncertainty_map.html` | ~141 MB | **Blocked** |
+| `Data/outputs/nga/tables/nga_prediction_breakdown.csv` | ~161 MB | **Blocked** |
+| `Nigeria Multidimensional Poverty Index Survey/SECTION D_ DISABILITY FOR 5 YEARS AND ABOVE.dta` | ~245 MB | **Blocked** |
+| `Data/outputs/nga/tables/nga_predictions.csv` | ~100 MB | **Warning** (>50 MB) |
+| `Nigeria Multidimensional Poverty Index Survey/SECTION C_ ECONOMIC ACTIVITY AND WORK HISTORY.dta` | ~60 MB | **Warning** (>50 MB) |
+
+**Why:** Folium HTML maps embed the full grid payload. Per-cell Ridge breakdown CSVs scale with row count (~100k+). NBS MPI `.dta` sections are survey microdata and can be very large. **Git LFS** is optional for teams that must version binaries; otherwise **do not commit** these artifacts.
+
+**What we did in-repo (May 2026):** `.gitignore` was updated to exclude the **full-grid** Folium HTML names (`nga_predictions_map.html`, `nga_uncertainty_map.html`, `nga_comparison_map.html`, `nga_dimension_comparison_map.html`, `nga_explainability_map.html` if present), the two large **CSV** paths above, and **`Nigeria Multidimensional Poverty Index Survey/**/*.dta`**. Smaller maps (e.g. `*_sample.html`) can remain tracked. Use **`*.parquet`** outputs for tables in Git; keep heavy artifacts **local** or in **LFS** / object storage.
+
+**If large files are already in your last commit(s) but never reached GitHub:** remove them from the index, then recommit (files stay on disk if you only un-track):
+
+```bash
+git rm --cached Data/outputs/nga/maps/nga_predictions_map.html Data/outputs/nga/maps/nga_uncertainty_map.html \
+  Data/outputs/nga/tables/nga_prediction_breakdown.csv Data/outputs/nga/tables/nga_predictions.csv \
+  "Nigeria Multidimensional Poverty Index Survey/SECTION D_ DISABILITY FOR 5 YEARS AND ABOVE.dta" \
+  "Nigeria Multidimensional Poverty Index Survey/SECTION C_ ECONOMIC ACTIVITY AND WORK HISTORY.dta"
+# …add any other paths `git status` still lists under Data/outputs or the NBS MPI folder…
+git commit -m "Stop tracking large outputs and NBS MPI .dta (GitHub GH001)"
+```
+
+**If the same blobs already exist in older commits on the branch:** you must **rewrite history** (e.g. [`git filter-repo`](https://github.com/newren/git-filter-repo)) or branch from a clean point before those files were added, then force-push per team policy. GitHub will keep rejecting pushes until no commit in the range contains a file over 100 MB.
+
+---
+
 ### Run the full Nigeria pipeline
 
 ```bash
@@ -762,6 +796,7 @@ Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unle
 | **WSNN permutation importance (E5)** | ✅ `weakly_supervised_nn.py` `_wsnn_permutation_importance()` → `nga_wsnn_importance.csv` on next run |
 | **Dimension-specific feature sets** | ✅ Per-dimension feature overrides in `config_nga.yaml` `dimensions.feature_overrides` (13–15 features each) |
 | **`PROJECT_STATUS.md` hygiene** (May 4, 2026) | ✅ **Maintaining this file** callout at top; **§6 Remaining TODOs (at a glance)**; repository snapshot + Summary + Priority 2 aligned with 46 features and D1 done; DHS config bullets corrected for stacked aux |
+| **GitHub `GH001` large-file rejection** (May 2026) | ✅ Documented in **§4** (file table, limits, `git rm --cached` + history note); **`.gitignore`** tightened — named full-grid Folium HTML maps, large prediction CSVs, `Nigeria Multidimensional Poverty Index Survey/**/*.dta` |
 
 ---
 

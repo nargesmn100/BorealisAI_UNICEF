@@ -72,9 +72,21 @@ dmypy.json
 # SPSS microdata files (licensed / confidential — do not commit)
 *.sav
 
-# Large generated output maps (Nigeria grid = 100K+ points, too large for GitHub)
-# Data/outputs/nga/maps/*.html
+# Large Folium HTML maps (full grid embedded — often >100 MB → GitHub GH001).
+# Keep *_sample.html and small maps trackable if needed.
+Data/outputs/nga/maps/nga_predictions_map.html
+Data/outputs/nga/maps/nga_uncertainty_map.html
+Data/outputs/nga/maps/nga_comparison_map.html
+Data/outputs/nga/maps/nga_dimension_comparison_map.html
+Data/outputs/nga/maps/nga_explainability_map.html
 Data/outputs/nga/maps/*.geojson
+
+# Large pipeline CSV exports (prefer Parquet in repo/scripts; CSV can exceed GitHub 100 MB cap)
+Data/outputs/nga/tables/nga_prediction_breakdown.csv
+Data/outputs/nga/tables/nga_predictions.csv
+
+# NBS MPI Stata microdata (restricted / large; ingestion uses selected sections only — see Data/Nigeria/d1_external/README.md)
+Nigeria Multidimensional Poverty Index Survey/**/*.dta
 
 # Large derived feature files
 Data/Nigeria/features/nga_osm_buildings.parquet
