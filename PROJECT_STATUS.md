@@ -421,6 +421,38 @@ git commit -m "Stop tracking large outputs and NBS MPI .dta (GitHub GH001)"
 
 **If the same blobs already exist in older commits on the branch:** you must **rewrite history** (e.g. [`git filter-repo`](https://github.com/newren/git-filter-repo)) or branch from a clean point before those files were added, then force-push per team policy. GitHub will keep rejecting pushes until no commit in the range contains a file over 100 MB.
 
+**Why `git rm --cached` + commit was not enough:** that only adds a *new* commit that deletes the paths. **Every older commit you push still contains the blobs**, so GitHub’s hook still scans them → `GH001`. You must **purge the paths from every commit** you are about to upload, then **force-push** the rewritten branch (coordinate with collaborators).
+
+#### History rewrite applied (May 2026) — `git filter-repo` + `push --force-with-lease`
+
+On this machine the fix was:
+
+1. Install: `pip3 install git-filter-repo --user` (then use `python3 -m git_filter_repo` if `git-filter-repo` is not on `PATH`).
+2. From repo root, **remove large paths from all commits** (and drop `origin` — `filter-repo` does that by design):
+
+```bash
+python3 -m git_filter_repo --force \
+  --path 'Nigeria Multidimensional Poverty Index Survey' \
+  --path 'Data/outputs/nga/maps/nga_predictions_map.html' \
+  --path 'Data/outputs/nga/maps/nga_uncertainty_map.html' \
+  --path 'Data/outputs/nga/maps/nga_comparison_map.html' \
+  --path 'Data/outputs/nga/maps/nga_dimension_comparison_map.html' \
+  --path 'Data/outputs/nga/maps/nga_explainability_map.html' \
+  --path 'Data/outputs/nga/tables/nga_prediction_breakdown.csv' \
+  --path 'Data/outputs/nga/tables/nga_predictions.csv' \
+  --invert-paths
+```
+
+3. Restore remote and push the rewritten branch:
+
+```bash
+git remote add origin https://github.com/nargesmn100/BorealisAI_UNICEF.git
+git fetch origin
+git push --force-with-lease origin franklin-2
+```
+
+**Aftermath:** `git filter-repo` **rewrites every ref in the clone** (all local branches get new SHAs). Your **GitHub `main`** may no longer match **local `main`**. To realign local `main` with the server: `git fetch origin && git checkout main && git reset --hard origin/main`. **Do not** force-push `main` unless the whole team agrees.
+
 ---
 
 ### Run the full Nigeria pipeline
@@ -796,7 +828,7 @@ Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unle
 | **WSNN permutation importance (E5)** | ✅ `weakly_supervised_nn.py` `_wsnn_permutation_importance()` → `nga_wsnn_importance.csv` on next run |
 | **Dimension-specific feature sets** | ✅ Per-dimension feature overrides in `config_nga.yaml` `dimensions.feature_overrides` (13–15 features each) |
 | **`PROJECT_STATUS.md` hygiene** (May 4, 2026) | ✅ **Maintaining this file** callout at top; **§6 Remaining TODOs (at a glance)**; repository snapshot + Summary + Priority 2 aligned with 46 features and D1 done; DHS config bullets corrected for stacked aux |
-| **GitHub `GH001` large-file rejection** (May 2026) | ✅ Documented in **§4** (file table, limits, `git rm --cached` + history note); **`.gitignore`** tightened — named full-grid Folium HTML maps, large prediction CSVs, `Nigeria Multidimensional Poverty Index Survey/**/*.dta` |
+| **GitHub `GH001` large-file rejection** (May 2026) | ✅ **§4** docs + **`.gitignore`** + **`python3 -m git_filter_repo --invert-paths`** (purge listed paths from all commits) + `git remote add` + **`git push --force-with-lease origin franklin-2`** — push succeeded |
 
 ---
 
