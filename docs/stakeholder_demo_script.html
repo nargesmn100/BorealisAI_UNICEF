@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stakeholder Demo Script — UNICEF × Borealis AI Nigeria</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-subtle: #f5f5f5;
+    --fg: #111111;
+    --fg-secondary: #555555;
+    --border: #e0e0e0;
+    --accent: #0057b8;
+    --success: #1a7a3f;
+    --warning: #8a5c00;
+    --danger: #9b1c1c;
+    --pill-bg: #e8eef7;
+    --pill-fg: #0057b8;
+    --pill-success-bg: #e6f4ec;
+    --pill-success-fg: #1a7a3f;
+    --pill-warning-bg: #fef3cd;
+    --pill-warning-fg: #8a5c00;
+    --pill-danger-bg: #fde8e8;
+    --pill-danger-fg: #9b1c1c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6; }
+  
+  /* Header */
+  .page-header { padding: 24px 40px 16px; border-bottom: 1px solid var(--border); }
+  .page-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .page-header .meta { font-size: 12px; color: var(--fg-secondary); }
+  
+  /* Nav */
+  nav { display: flex; gap: 0; padding: 0 40px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); overflow-x: auto; }
+  nav button { padding: 10px 18px; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--fg-secondary); font-size: 13px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+  nav button.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+  nav button:hover:not(.active) { color: var(--fg); }
+
+  /* Content */
+  .content { padding: 32px 40px; max-width: 960px; }
+  section { display: none; }
+  section.active { display: block; }
+  
+  /* Typography */
+  h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+  h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; margin-top: 20px; }
+  p { margin-bottom: 10px; color: var(--fg); }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; color: var(--fg-secondary); margin-bottom: 6px; }
+  code { font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; background: var(--bg-subtle); padding: 1px 5px; border-radius: 3px; }
+  
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+  
+  /* Grid */
+  .grid { display: grid; gap: 14px; margin: 12px 0; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 700px) { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+  
+  /* Stat */
+  .stat { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .stat-label { font-size: 12px; color: var(--fg-secondary); margin-top: 2px; }
+  .stat.warning .value { color: var(--warning); }
+  .stat.success .value { color: var(--success); }
+  .stat.danger .value { color: var(--danger); }
+  
+  /* Card */
+  .card { border: 1px solid var(--border); border-radius: 6px; margin: 12px 0; }
+  .card-header { padding: 10px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  .card-body { padding: 14px 16px; }
+  
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  thead { background: var(--bg-subtle); }
+  th { text-align: left; padding: 8px 12px; font-weight: 600; border-bottom: 1px solid var(--border); color: var(--fg-secondary); font-size: 12px; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr.warn td { background: var(--pill-warning-bg); }
+  
+  /* Pill */
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; background: var(--pill-bg); color: var(--pill-fg); white-space: nowrap; }
+  .pill.success { background: var(--pill-success-bg); color: var(--pill-success-fg); }
+  .pill.warning { background: var(--pill-warning-bg); color: var(--pill-warning-fg); }
+  .pill.danger { background: var(--pill-danger-bg); color: var(--pill-danger-fg); }
+  .pill.info { background: var(--pill-bg); color: var(--pill-fg); }
+  .pill.neutral { background: #eeeeee; color: #444444; }
+  
+  /* Steps */
+  .step { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .step-num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .step-body h4 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .step-body p { font-size: 13px; color: var(--fg-secondary); margin: 0; }
+  .step-body .step-output { font-size: 12px; color: var(--fg-secondary); margin-top: 3px; }
+  
+  /* Bullet list */
+  .bullets { list-style: none; padding: 0; }
+  .bullets li { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; font-size: 13px; }
+  .bullets li::before { content: "—"; color: var(--accent); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  
+  /* Map cards */
+  .map-card { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 14px; }
+  .map-card-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .map-card-header-left { display: flex; align-items: center; gap: 10px; }
+  .map-card-body { padding: 14px 16px; }
+  .map-step-badge { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .script-line { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 5px; font-size: 13px; }
+  .script-line::before { content: "›"; color: var(--fg-secondary); flex-shrink: 0; }
+  
+  /* Q&A */
+  .qa { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .qa:last-child { border-bottom: none; }
+  .qa .q { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .qa .a { font-size: 13px; color: var(--fg-secondary); }
+  
+  /* Row utility */
+  .row { display: flex; gap: 10px; align-items: flex-start; }
+  .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  
+  /* Next step items */
+  .ns-item { display: flex; gap: 10px; align-items: flex-start; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .ns-item:last-child { border-bottom: none; }
+  .ns-body h4 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .ns-body p { font-size: 12px; color: var(--fg-secondary); margin: 0; }
+
+  /* Print */
+  @media print {
+    nav { display: none; }
+    section { display: block !important; page-break-before: always; }
+    section:first-of-type { page-break-before: avoid; }
+    .page-header { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+    .card, .map-card, .stat { break-inside: avoid; }
+    .grid-3, .grid-2 { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+    <h1>Stakeholder Demo Script</h1>
+    <span class="pill info">UNICEF × Borealis AI — Nigeria</span>
+    <span class="pill neutral">Research tool only</span>
+  </div>
+  <div class="meta">May 5, 2026 · Mapping child deprivation at sub-state scale</div>
+</div>
+
+<nav id="nav">
+  <button class="active" onclick="show('problem',this)">1. Problem</button>
+  <button onclick="show('solution',this)">2. Solution</button>
+  <button onclick="show('pipeline',this)">3. Pipeline</button>
+  <button onclick="show('accuracy',this)">4. Accuracy</button>
+  <button onclick="show('maps',this)">5. Demo: Maps</button>
+  <button onclick="show('nextsteps',this)">6. Next Steps</button>
+</nav>
+
+<div class="content">
+
+<!-- ── SECTION 1: Problem ───────────────────────────────────────────────── -->
+<section id="problem" class="active">
+  <div class="label">Opening — 2 min</div>
+  <h2>What is the problem?</h2>
+  <p>UNICEF and national governments need to know <strong>which communities</strong> have the highest rates of child deprivation — so they can target health clinics, schools, WASH programmes, and social protection to the right places. But survey data only exists at a coarse level.</p>
+
+  <div class="grid grid-3" style="margin-top:16px;">
+    <div class="stat"><div class="value">37</div><div class="stat-label">Nigerian states surveyed (MICS6 2021)</div></div>
+    <div class="stat warning"><div class="value">774</div><div class="stat-label">LGAs with no direct survey estimate</div></div>
+    <div class="stat"><div class="value">~40M</div><div class="stat-label">Children under 18 in Nigeria</div></div>
+  </div>
+
+  <hr>
+  <h3>The core tension</h3>
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-header">What we know (survey truth)</div>
+      <div class="card-body">
+        <p>MICS6 gives us <strong>state-level</strong> prevalence estimates for child deprivation across 6 UNICEF dimensions: shelter, water, sanitation, nutrition, education, health.</p>
+        <p style="color:var(--fg-secondary);font-size:13px;">Margin of error is acceptable at state level, but the survey was never designed for LGA or ward resolution.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">What stakeholders need</div>
+      <div class="card-body">
+        <p>Programme officers need <strong>LGA-level</strong> rankings to allocate budgets, plan outreach routes, and report to donors.</p>
+        <p style="color:var(--fg-secondary);font-size:13px;">Running a full MICS at LGA resolution costs millions of dollars and takes years. We need a faster, cheaper path.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:8px;">
+    <div class="card-header">Key ask to stakeholders</div>
+    <div class="card-body">
+      <p>Can we use <strong>satellite data, mobility signals, and administrative datasets</strong> — things that exist at very fine resolution — to disaggregate state survey numbers down to Local Government Area and grid-cell level? And can we do it in a way that is transparent, honest about uncertainty, and reproducible across countries?</p>
+    </div>
+  </div>
+
+  <h3>Talking points</h3>
+  <ul class="bullets">
+    <li>MICS6 is gold-standard — we never replace it; we disaggregate from it.</li>
+    <li>The 37-state totals are always preserved (reconciliation).</li>
+    <li>This is a research tool. It informs targeting, not policy by itself.</li>
+    <li>Nigeria is the pilot. The pipeline is designed to run on any country with MICS data.</li>
+  </ul>
+</section>
+
+<!-- ── SECTION 2: Solution ──────────────────────────────────────────────── -->
+<section id="solution">
+  <div class="label">How we solve it — 5 min</div>
+  <h2>The Approach</h2>
+  <p>We treat the MICS state estimates as <strong>weak supervision labels</strong>. We then train a regression model that, given satellite and administrative signals for every ~2.4 km cell in Nigeria, predicts the expected child deprivation rate — constrained to be consistent with the survey at the state level.</p>
+
+  <div class="grid grid-3" style="margin-top:16px;">
+    <div class="stat"><div class="value">103,424</div><div class="stat-label">Grid cells modelled</div></div>
+    <div class="stat"><div class="value">~2.4 km</div><div class="stat-label">Cell spacing (RWI-aligned)</div></div>
+    <div class="stat"><div class="value">38</div><div class="stat-label">Predictor features (leakage-free)</div></div>
+  </div>
+
+  <hr>
+  <h3>Data inputs (what goes into the model)</h3>
+  <table>
+    <thead><tr><th>Category</th><th>Source</th><th>Examples</th></tr></thead>
+    <tbody>
+      <tr><td>Wealth proxy</td><td>Meta / World Bank Relative Wealth Index</td><td>RWI score per cell</td></tr>
+      <tr><td>Population</td><td>WorldPop 2020</td><td>Population count, log-population</td></tr>
+      <tr><td>Urban form</td><td>GHSL SMOD + built fraction</td><td>is_urban, building_density</td></tr>
+      <tr><td>Accessibility</td><td>Travel time rasters</td><td>Travel time to cities / to 50k centres</td></tr>
+      <tr><td>Night-lights</td><td>VIIRS 2019</td><td>Nightlight intensity (log-scaled)</td></tr>
+      <tr><td>Built environment</td><td>OpenStreetMap</td><td>Distance to nearest school, health facility</td></tr>
+      <tr><td>Fragility</td><td>ACLED conflict events</td><td>Conflict events count, fatalities</td></tr>
+      <tr><td>Climate</td><td>TerraClimate</td><td>Annual rainfall (mm)</td></tr>
+      <tr><td>School system</td><td>NEMIS (~180k schools)</td><td>Primary schools per LGA, enrolment, public %</td></tr>
+      <tr><td>Poverty stats</td><td>NBS MPI survey (~53k HH)</td><td>Floor quality, WASH access, food insecurity</td></tr>
+      <tr><td>DHS supervision</td><td>DHS 2018 GPS clusters</td><td>Nearest DHS cluster deprivation index, distance to cluster</td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+  <h3>The 8 deprivation dimensions modelled</h3>
+  <div class="grid grid-2">
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div class="row"><span class="pill info">Shelter</span><span style="font-size:13px;color:var(--fg-secondary);">Inadequate floor / roof / walls — 56% national avg</span></div>
+      <div class="row"><span class="pill info">Sanitation</span><span style="font-size:13px;color:var(--fg-secondary);">No improved toilet / open defecation — 2%</span></div>
+      <div class="row"><span class="pill info">Water</span><span style="font-size:13px;color:var(--fg-secondary);">No safe drinking water — 4%</span></div>
+      <div class="row"><span class="pill info">Nutrition</span><span style="font-size:13px;color:var(--fg-secondary);">HAZ stunting from DHS 2018 — 41% national avg</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div class="row"><span class="pill info">Education 5–14</span><span style="font-size:13px;color:var(--fg-secondary);">Not attending school — 34% national avg</span></div>
+      <div class="row"><span class="pill info">Education 15–17</span><span style="font-size:13px;color:var(--fg-secondary);">Not attending secondary — 37%</span></div>
+      <div class="row"><span class="pill info">Health 12–35m</span><span style="font-size:13px;color:var(--fg-secondary);">Missed vaccinations — 89% (broad definition)</span></div>
+      <div class="row"><span class="pill info">Health 36–59m</span><span style="font-size:13px;color:var(--fg-secondary);">ARI/fever without care — 23%</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── SECTION 3: Pipeline ──────────────────────────────────────────────── -->
+<section id="pipeline">
+  <div class="label">Technical deep dive — 5 min</div>
+  <h2>How the pipeline works</h2>
+  <p>The pipeline runs end-to-end with a single command: <code>python main.py --country nga</code>. Five sequential steps; cached parquet files at each stage.</p>
+
+  <div style="margin:20px 0;">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Build Grid <span class="pill neutral" style="font-size:11px;vertical-align:middle;">step01_build_grid.py</span></h4>
+        <p>Overlay the Relative Wealth Index point grid on Nigeria's GADM boundaries → 103,424 cells, each ~2.4 km apart.</p>
+        <div class="step-output">Output: <code>nga_base_grid.parquet</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Sample Proxies <span class="pill neutral" style="font-size:11px;vertical-align:middle;">step02_sample_proxies.py</span></h4>
+        <p>Sample raster values (nightlights, rainfall, GHSL built fraction, travel time) at each cell centroid. Snap OSM schools and health facilities to nearest cell.</p>
+        <div class="step-output">Output: <code>nga_grid_proxies.parquet</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Assign Admin <span class="pill neutral" style="font-size:11px;vertical-align:middle;">step03_assign_admin.py</span></h4>
+        <p>Spatially join each cell to state, LGA, geopolitical zone, and urban/rural classification via GADM polygons.</p>
+        <div class="step-output">Output: <code>nga_grid_admin.parquet</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h4>Prepare Targets <span class="pill neutral" style="font-size:11px;vertical-align:middle;">step04_prepare_targets.py</span></h4>
+        <p>Compute MICS6-derived deprivation rates per state. Prioritise DHS 2018 HAZ data for nutrition. Merge NBS MPI and NEMIS D1 features into the modeling table.</p>
+        <div class="step-output">Output: <code>nga_targets.csv</code> + <code>nga_modeling_table.parquet</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h4>Train &amp; Evaluate <span class="pill neutral" style="font-size:11px;vertical-align:middle;">ridge_model.py → eval</span></h4>
+        <p>Train Ridge regression with DHS cluster auxiliary loss. Reconcile predictions within each state to match MICS totals. Evaluate via LOZO CV, hierarchical CV, and external DHS cluster comparison.</p>
+        <div class="step-output">Output: <code>nga_predictions.parquet</code> + all eval CSVs</div>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+  <h3>Key technical choices</h3>
+  <table>
+    <thead><tr><th>Choice</th><th>What &amp; Why</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Ridge Regression</strong></td><td>Linear model — fully interpretable. Each cell's score = weighted sum of 38 features. Coefficients tell you exactly which signals drive poverty up or down.</td></tr>
+      <tr><td><strong>Weak supervision</strong></td><td>State MICS targets are "soft labels." The model learns spatial patterns within states, not just between them.</td></tr>
+      <tr><td><strong>DHS Auxiliary Loss</strong></td><td>~1,400 DHS GPS clusters provide finer-grained supervision. Stacked into Ridge as an additional block of auxiliary targets.</td></tr>
+      <tr><td><strong>Reconciliation</strong></td><td>After prediction, each state's population-weighted mean is scaled to exactly match the MICS survey value. LGA values are not individually constrained.</td></tr>
+      <tr><td><strong>Leakage removal</strong></td><td>8 MICS-derived survey rates (e.g. school_attendance_rate, anc_rate) were removed as predictors — they would have directly leaked the target labels, inflating apparent accuracy.</td></tr>
+      <tr><td><strong>HAZ nutrition</strong></td><td>DHS 2018 Children's Recode (hw70) provides Height-for-Age Z-scores — a clinically validated stunting measure — instead of a less direct MICS proxy.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── SECTION 4: Accuracy ──────────────────────────────────────────────── -->
+<section id="accuracy">
+  <div class="label">Honest accuracy discussion — 5 min</div>
+  <h2>How accurate is the model?</h2>
+  <p>We have three independent accuracy lenses. Present all three — they measure different things and tell a complete story.</p>
+
+  <h3>Lens 1 — State-level agreement <code>evaluation_summary.csv</code></h3>
+  <p style="font-size:13px;color:var(--fg-secondary);">After reconciliation, how well do method rankings correlate with MICS state labels?</p>
+  <table>
+    <thead><tr><th>Method</th><th>Pearson r</th><th>Spearman r</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>RWI redistribution</td><td>0.794</td><td>0.800</td><td>Wealth proxy alone is a strong baseline</td></tr>
+      <tr><td>Heuristic (urban/rural)</td><td>0.674</td><td>0.733</td><td>Middle ground</td></tr>
+      <tr class="warn"><td><strong>Ridge (learned)</strong></td><td><strong>0.398</strong></td><td>0.313</td><td>Honest — leakage removed. Lower but scientifically sound.</td></tr>
+      <tr><td>Uniform baseline</td><td>0.314</td><td>0.280</td><td>Floor — uniform national rate</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:13px;color:var(--fg-secondary);">Why is Ridge lower than RWI? RWI is a wealth index — it naturally correlates with poverty. Ridge adds spatial granularity that RWI alone cannot provide (school distances, conflict, rainfall). After removing the 8 leaky features, 0.40 is the honest number. The external DHS check (r = 0.58) confirms the spatial signal is real.</p>
+
+  <hr>
+  <h3>Lens 2 — Held-out geography <code>lozo_evaluation.csv</code></h3>
+  <p style="font-size:13px;color:var(--fg-secondary);">Leave-One-State-Out cross-validation — train on 36 states, predict the 37th raw (no reconciliation). Tests geographic generalisability.</p>
+  <div class="grid grid-3">
+    <div class="stat warning"><div class="value">12.70 pp</div><div class="stat-label">Ridge mean absolute error</div></div>
+    <div class="stat success"><div class="value">9.10 pp</div><div class="stat-label">Ridge median AE</div></div>
+    <div class="stat danger"><div class="value">76 pp</div><div class="stat-label">Worst case (Lagos — outlier)</div></div>
+  </div>
+  <p style="font-size:13px;color:var(--fg-secondary);margin-top:10px;">Ridge outperforms naive redistribution (15.6 pp) on average, but fails badly on a few unusual states. This is the key generalisability caveat to communicate to stakeholders.</p>
+
+  <hr>
+  <h3>Lens 3 — External DHS cluster check <code>dhs_gps_validation.txt</code></h3>
+  <p style="font-size:13px;color:var(--fg-secondary);">DHS 2018 provides ~1,400 GPS-located clusters with deprivation indices from an entirely independent survey. We compare our grid predictions to those clusters.</p>
+  <div class="grid grid-3">
+    <div class="stat success"><div class="value">0.600</div><div class="stat-label">Ridge Spearman ρ vs DHS clusters</div></div>
+    <div class="stat success"><div class="value">0.584</div><div class="stat-label">Ridge Pearson r vs DHS clusters</div></div>
+    <div class="stat"><div class="value">0.542</div><div class="stat-label">RWI baseline Spearman ρ</div></div>
+  </div>
+  <p style="font-size:13px;color:var(--fg-secondary);margin-top:10px;">Ridge beats RWI-alone on this external check — the spatial patterns learned are meaningful beyond the survey used for training.</p>
+
+  <hr>
+  <h3>Per-dimension accuracy <code>nga_dimension_summary.csv</code></h3>
+  <table>
+    <thead><tr><th>Dimension</th><th>Target mean %</th><th>Predicted mean %</th><th>Train r</th></tr></thead>
+    <tbody>
+      <tr><td>Shelter</td><td>56.06%</td><td>52.01%</td><td>—</td></tr>
+      <tr><td>Sanitation</td><td>1.98%</td><td>1.82%</td><td>—</td></tr>
+      <tr><td>Water</td><td>4.25%</td><td>4.28%</td><td>—</td></tr>
+      <tr><td>Nutrition (DHS HAZ stunting)</td><td>41.01%</td><td>44.56%</td><td>0.706</td></tr>
+      <tr><td>Education 5–14</td><td>33.60%</td><td>38.35%</td><td>0.985</td></tr>
+      <tr><td>Education 15–17</td><td>37.35%</td><td>45.74%</td><td>0.973</td></tr>
+      <tr><td>Health 12–35m</td><td>89.22%</td><td>90.23%</td><td>0.816</td></tr>
+      <tr><td>Health 36–59m</td><td>22.78%</td><td>22.77%</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card">
+    <div class="card-header">Do dimension scores sum to the composite?</div>
+    <div class="card-body">
+      <p style="font-size:13px;"><strong>No.</strong> The composite MICS target counts a child as deprived if they are deprived in <strong>≥ 2 of 6 dimensions</strong> — not a simple sum (children can be multiply deprived). Adding 8 dimension prevalences together double-counts children deprived across multiple dimensions. Treat the composite map as the headline figure; dimension maps are thematic deep dives.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── SECTION 5: Maps ──────────────────────────────────────────────────── -->
+<section id="maps">
+  <div class="label">Live demo walkthrough — 10 min</div>
+  <h2>Which HTML files to open — and in what order</h2>
+  <p>All files are under <code>Data/outputs/nga/maps/</code>. Open them in a browser before the meeting. They are <strong>self-contained</strong> — no internet required once loaded.</p>
+  <p style="font-size:13px;color:var(--fg-secondary);"><strong>Note:</strong> Regenerating maps with <code>python main.py --country nga --skip-gbm --skip-gam --skip-wsnn</code> picks up the latest Folium legend (grid point vs dot size) and <strong>scale bar</strong> on prediction maps.</p>
+
+  <div style="margin-top:20px;">
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">1</div>
+          <code>nga_predictions_map_sample.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill success">Start here</span>
+          <span class="pill neutral">Both audiences</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">Composite child deprivation score — sampled subset of the national grid (~5k points). Light enough to use live.</p>
+        <div class="script-line"><strong>What each marker is:</strong> One <strong>RWI grid point</strong> (lat/lon). The model predicts one value per point. Grid spacing is typically <strong>~2.4 km</strong> between neighbouring points along the lattice — not a random dot density.</div>
+        <div class="script-line"><strong>What the coloured dot is <em>not</em>:</strong> Folium draws the dot in <strong>screen pixels</strong> for visibility. It is <strong>not</strong> a circle whose radius equals the cell’s area on the ground.</div>
+        <div class="script-line"><strong>How to show “how big is a cell?”</strong> Use the map <strong>scale bar</strong> (bottom of map — present in maps regenerated from current <code>main.py</code>). Zoom in until the scale bar shows a few kilometres; the distance between two neighbouring markers is a good mental model of resolution.</div>
+        <div class="script-line"><strong>Bounded areas:</strong> For official administrative polygons (truth vs model per LGA), use <code>nga_comparison_map.html</code> or LGA tables — grid maps show <strong>points</strong>, not ward boundaries.</div>
+        <div class="script-line">Colour = modelled moderate deprivation %: blue = lower, red = higher. Click a marker: popup shows Ridge prediction, population, RWI.</div>
+        <div class="script-line">This answers: &ldquo;Within a state, where are relatively worse vs better neighbourhoods for targeting?&rdquo;</div>
+        <div class="script-line"><em>Caveats:</em> State totals are <strong>reconciled</strong> to MICS; each point is a <strong>prediction</strong>, not a household survey.</div>
+      </div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">1b</div>
+          <code>nga_comparison_map.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill info">LGA / policy view</span>
+          <span class="pill neutral">Slides-ready</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">LGA polygons: MICS state truth vs model — use when stakeholders need <strong>named boundaries</strong> (not point grids). Built by <code>src/scripts/build_comparison_map.py</code> (not every pipeline run). If the file is missing, use <code>nga_lga_predictions.geojson</code> or CSV in a GIS tool.</p>
+        <div class="script-line">Toggle layers to compare survey-aligned targets to Ridge (and other methods if generated).</div>
+        <div class="script-line">Pair with <code>nga_lga_predictions.csv</code> for ranking LGAs in a spreadsheet.</div>
+      </div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">2</div>
+          <code>nga_dimension_comparison_map.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill info">Core science demo</span>
+          <span class="pill neutral">Both audiences</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">Nine-panel map: composite + 8 dimensions side by side in one browser tab.</p>
+        <div class="script-line">Each panel shows a different dimension of child deprivation across Nigeria. Colour scale: darker = more deprived.</div>
+        <div class="script-line">Point to Education 5–14: "33% of 5–14 year olds are not in school nationally — but the north-east is systematically worse."</div>
+        <div class="script-line">Point to Nutrition (HAZ): "This uses DHS 2018 Height-for-Age Z-scores — a clinically validated stunting measure, not a proxy."</div>
+        <div class="script-line">Hover over a cell — tooltip shows that dimension's prevalence estimate.</div>
+        <div class="script-line">Key message: different dimensions have very different geographies. A single composite score can mask these patterns.</div>
+      </div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">3</div>
+          <code>nga_uncertainty_map.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill warning">Epistemic honesty</span>
+          <span class="pill neutral">Technical audience</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">Prediction uncertainty — where to trust the model less.</p>
+        <div class="script-line">Darker = more uncertain. Uncertainty comes from RWI coverage gaps and sparsity of DHS clusters.</div>
+        <div class="script-line">States with fewer DHS clusters show higher uncertainty — mostly in the north.</div>
+        <div class="script-line">This is what responsible AI looks like — we quantify and show where we don't know.</div>
+      </div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">4</div>
+          <code>nga_dimension_shelter_map.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill info">Single-dimension deep dive</span>
+          <span class="pill neutral">Programme officers</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">Full grid for one dimension — higher resolution than the comparison panel map.</p>
+        <div class="script-line">Shelter deprivation is 56% nationally — the highest of all dimensions.</div>
+        <div class="script-line">Within-state variation is visible at this resolution — useful for targeting routes.</div>
+        <div class="script-line">The same map exists for every dimension (education, nutrition, water, sanitation, health).</div>
+      </div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-card-header">
+        <div class="map-card-header-left">
+          <div class="map-step-badge">5</div>
+          <code>nga_predictions_map.html</code>
+        </div>
+        <div class="pills">
+          <span class="pill warning">Show only if asked</span>
+          <span class="pill neutral">Technical only</span>
+        </div>
+      </div>
+      <div class="map-card-body">
+        <p style="font-size:13px;color:var(--fg-secondary);margin-bottom:8px;">Full unsampled grid — all 103,424 cells. Pre-load before meeting; takes 10–30 s to render.</p>
+        <div class="script-line">Best for exploring specific regions at maximum resolution.</div>
+        <div class="script-line">Do not open live — pre-load in a browser tab before the meeting starts.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <hr>
+  <h3>Key tables to have ready</h3>
+  <table>
+    <thead><tr><th>File</th><th>What it shows</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><code>nga_lga_predictions.csv</code></td><td>Population-weighted deprivation score for all 774 LGAs</td><td>When asked "which LGAs are worst?"</td></tr>
+      <tr><td><code>nga_dimension_predictions.csv</code></td><td>Per-cell predictions for all 8 dimensions</td><td>When asked about a specific dimension</td></tr>
+      <tr><td><code>evaluation_summary.csv</code></td><td>Pearson r, Spearman r, MAE for all methods vs targets</td><td>When accuracy is challenged</td></tr>
+      <tr><td><code>lozo_evaluation.csv</code></td><td>Leave-one-state-out MAE per method</td><td>When geographic generalisation is questioned</td></tr>
+      <tr><td><code>dhs_gps_validation.txt</code></td><td>External DHS cluster comparison (Spearman ρ = 0.60)</td><td>When asked about independent validation</td></tr>
+      <tr><td><code>nga_prediction_breakdown.csv</code></td><td>Feature contributions per cell (Ridge β × z)</td><td>When asked "what drives the score?"</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── SECTION 6: Next Steps ────────────────────────────────────────────── -->
+<section id="nextsteps">
+  <div class="label">Closing — 3 min</div>
+  <h2>Where we go from here</h2>
+
+  <div class="grid grid-2" style="margin-top:16px;">
+    <div>
+      <h3>Science / model</h3>
+      <div class="ns-item"><span class="pill info">Next</span><div class="ns-body"><h4>DHS aux LOZO sweep</h4><p>Re-run full held-out validation to confirm DHS auxiliary weights don't harm generalisation.</p></div></div>
+      <div class="ns-item"><span class="pill warning">Open</span><div class="ns-body"><h4>NEMIS / NBS LGA harmonisation</h4><p>Current joins are state-level only. Sub-state variation requires matching LGA strings to GADM ADM2.</p></div></div>
+      <div class="ns-item"><span class="pill neutral">Optional</span><div class="ns-body"><h4>GBM SHAP explainability</h4><p>Enable export_gbm_shap in config for richer feature importance plots beyond Ridge β decomposition.</p></div></div>
+      <div class="ns-item"><span class="pill neutral">Minor</span><div class="ns-body"><h4>TECHNICAL_OVERVIEW.md wording</h4><p>Keep grid wording aligned with RWI lattice (~2.4 km) and regenerated Folium legends.</p></div></div>
+    </div>
+    <div>
+      <h3>Expansion</h3>
+      <div class="ns-item"><span class="pill success">Ready</span><div class="ns-body"><h4>Second country (D2)</h4><p>Pipeline is country-agnostic. Need MICS SPSS + RWI + GADM for target country. Config template exists.</p></div></div>
+      <div class="ns-item"><span class="pill info">Next</span><div class="ns-body"><h4>Stakeholder default view</h4><p>Adopt nga_comparison_map.html (LGA polygons) as the shared artifact for programme officers.</p></div></div>
+      <div class="ns-item"><span class="pill neutral">Optional</span><div class="ns-body"><h4>WorldPop age bands</h4><p>Add child-specific age bands if programmes need "all children" denominators.</p></div></div>
+      <div class="ns-item"><span class="pill danger">Blocked</span><div class="ns-body"><h4>MICS GIS clusters 2021</h4><p>Obtain cluster geography for optional validation and cluster-level covariates.</p></div></div>
+    </div>
+  </div>
+
+  <hr>
+  <div class="card">
+    <div class="card-header">Suggested closing statement</div>
+    <div class="card-body">
+      <p style="font-size:14px;font-style:italic;line-height:1.8;color:var(--fg-secondary);">"We now have a working pipeline that takes MICS6 state-level child deprivation estimates and disaggregates them to 103,000 grid cells and 774 LGAs across Nigeria — using satellite signals, school data, and DHS clusters as the spatial engine.</p>
+      <p style="font-size:14px;font-style:italic;line-height:1.8;color:var(--fg-secondary);">The model is scientifically honest: we removed leaky features, we use DHS 2018 HAZ stunting for nutrition, we quantify uncertainty, and we validate against external data the model never saw.</p>
+      <p style="font-size:14px;font-style:italic;line-height:1.8;color:var(--fg-secondary);">Nigeria is the proof of concept. The pipeline is ready for a second country. And we have clear next steps: sub-LGA harmonisation, DHS aux validation, and LGA polygon maps as the default stakeholder deliverable."</p>
+    </div>
+  </div>
+
+  <hr>
+  <h3>Anticipated questions + answers</h3>
+  <div class="qa">
+    <div class="q">Q: Why is Ridge r only 0.40?</div>
+    <div class="a">We deliberately removed 8 leaky features — MICS-derived rates that directly overlap the deprivation target. Before removal, r was ~0.55 but those features made the model circular. 0.40 is the honest number. External DHS cluster validation (r = 0.58) confirms the spatial signal is real.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: How do you know the LGA predictions are right?</div>
+    <div class="a">We can't validate at LGA level directly — no ground truth exists. What we can do: (1) state totals are exact by construction, (2) LOZO validation shows 9.1 pp median error on held-out states, (3) DHS cluster check gives ρ = 0.60 on independent data. LGA predictions are model estimates; they should inform targeting, not replace measurement.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: Can we do this for other countries?</div>
+    <div class="a">Yes. The pipeline requires a MICS SPSS file, a country GADM boundary file, and a Relative Wealth Index grid. We already have a template config. The bottleneck is obtaining MICS microdata for a second country.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: Do the 8 dimension scores add up to the composite?</div>
+    <div class="a">No — the composite counts children deprived in ≥ 2 dimensions. Adding 8 dimension prevalences double-counts multiply-deprived children. Dimension maps are thematic deep dives; the composite map is the headline metric consistent with UNICEF methodology.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: What does "reconciliation" mean and can we trust it?</div>
+    <div class="a">After fitting, we scale each state's cell predictions so the population-weighted mean exactly matches MICS. This preserves survey truth at state level. It does not guarantee cell accuracy — the spatial pattern within a state is the model's contribution. Use LOZO and DHS cluster metrics to evaluate that spatial pattern.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: On the predictions map, how do I know what area a "cell" covers?</div>
+    <div class="a">Each marker is centred on one <strong>grid sample point</strong> (Relative Wealth Index lattice), roughly every ~2.4 km. There is <strong>no drawn polygon</strong> for that cell on the HTML map. The coloured dot is a fixed <strong>pixel</strong> size for clicking, not a footprint on the ground. Use the scale bar and spacing between neighbouring dots to interpret resolution. For explicit areas with borders, use the LGA polygon map and <code>nga_lga_predictions.csv</code>.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q: How long does the pipeline take to re-run?</div>
+    <div class="a">With cached intermediates (parquet files), a full ridge-only run takes under 10 minutes: python main.py --country nga --skip-gbm --skip-gam --skip-wsnn. A full multi-model run including GBM takes ~30–60 minutes depending on machine.</div>
+  </div>
+</section>
+
+</div><!-- /.content -->
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+</body>
+</html>

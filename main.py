@@ -49,6 +49,25 @@ from src.utils.config_loader import load_config, setup_logging
 logger = logging.getLogger(__name__)
 
 
+def _lat_lon_parts(row: pd.Series) -> tuple[str, str]:
+    """HTML line for popup and plain tooltip text (5 decimal places ~1 m)."""
+    lat, lon = row.get("latitude"), row.get("longitude")
+    if pd.notna(lat) and pd.notna(lon):
+        la, lo = float(lat), float(lon)
+        return (f"Lat: {la:.5f}, Lon: {lo:.5f}<br>", f"{la:.5f}, {lo:.5f}")
+    return ("Lat/Lon: N/A<br>", "Lat/Lon N/A")
+
+
+def _cell_id_line(row: pd.Series) -> str:
+    cid = row.get("cell_id")
+    if cid is None or (isinstance(cid, float) and pd.isna(cid)):
+        return ""
+    try:
+        return f"Cell ID: {int(cid)}<br>"
+    except (TypeError, ValueError):
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -419,8 +438,12 @@ def phase_outputs(
         center_lat = map_df["latitude"].mean()
         center_lon = map_df["longitude"].mean()
 
-        fmap = folium.Map(location=[center_lat, center_lon], zoom_start=6,
-                          tiles="CartoDB positron")
+        fmap = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=6,
+            tiles="CartoDB positron",
+            control_scale=True,
+        )
 
         # Pick the best available prediction column
         col_priority = ["gbm_moderate", "gam_moderate", "ridge_moderate",
@@ -429,10 +452,17 @@ def phase_outputs(
 
         def _make_popup_html(row, plot_col_val):
             explain = row.get("ridge_bdg_popup")
+            geo_html, _ = _lat_lon_parts(row)
+            rwi = row.get("rwi")
+            rwi_s = f"{float(rwi):.2f}" if pd.notna(rwi) else "N/A"
+            pop = row.get("population")
+            pop_s = f"{float(pop):.0f}" if pd.notna(pop) else "N/A"
             base = (
                 f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
-                f"RWI: {row.get('rwi', 'N/A'):.2f}<br>"
-                f"Pop: {row.get('population', 'N/A'):.0f}<br>"
+                f"{_cell_id_line(row)}"
+                f"{geo_html}"
+                f"RWI: {rwi_s}<br>"
+                f"Pop: {pop_s}<br>"
                 f"Moderate poverty: {plot_col_val:.1f}%"
             )
             if explain and isinstance(explain, str) and explain.strip():
@@ -448,7 +478,8 @@ def phase_outputs(
                         font-family:Arial,sans-serif;max-width:310px;font-size:12px;">
               <b style="font-size:13px;">Nigeria Child Deprivation — Cell Level</b><br>
               <span style="color:#555;">
-                Each <b>circle = 1 grid cell</b> (~1 km²).<br>
+                Each <b>circle</b> = one <b>grid point</b> (RWI lattice, ~2.4 km typical spacing in Nigeria).<br>
+                <b>Dot size is for visibility only</b> (pixels on screen), not the geographic footprint.<br>
                 <b>Colour</b> = {plot_col_name.replace('_',' ')} (%)
                 &nbsp; <b style="color:#2166ac;">▊</b> low &rarr;
                        <b style="color:#d73027;">▊</b> high<br>
@@ -483,6 +514,7 @@ def phase_outputs(
                 val = row[plot_col]
                 if pd.isna(val):
                     continue
+                _, tip_txt = _lat_lon_parts(row)
                 pop_html, w = _make_popup_html(row, val)
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
@@ -492,6 +524,7 @@ def phase_outputs(
                     fill_color=colormap(val),
                     fill_opacity=fill_opacity,
                     popup=folium.Popup(pop_html, max_width=w),
+                    tooltip=folium.Tooltip(tip_txt, sticky=True),
                 ).add_to(dest)
 
             fmap.get_root().html.add_child(
@@ -505,8 +538,12 @@ def phase_outputs(
 
         # ---- Sampled map: lighter file for quick demos ----------------
         if plot_col and n_cells > sample_cells:
-            fmap_s = folium.Map(location=[center_lat, center_lon], zoom_start=6,
-                                tiles="CartoDB positron")
+            fmap_s = folium.Map(
+                location=[center_lat, center_lon],
+                zoom_start=6,
+                tiles="CartoDB positron",
+                control_scale=True,
+            )
             colormap.add_to(fmap_s)
             strat_col = "subregion" if "subregion" in map_df.columns else None
             if strat_col:
@@ -522,6 +559,7 @@ def phase_outputs(
                 val = row[plot_col]
                 if pd.isna(val):
                     continue
+                _, tip_txt = _lat_lon_parts(row)
                 pop_html, w = _make_popup_html(row, val)
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
@@ -531,6 +569,7 @@ def phase_outputs(
                     fill_color=colormap(val),
                     fill_opacity=0.70,
                     popup=folium.Popup(pop_html, max_width=w),
+                    tooltip=folium.Tooltip(tip_txt, sticky=True),
                 ).add_to(fmap_s)
             fmap_s.get_root().html.add_child(
                 folium.Element(_folium_legend_html(plot_col, len(sampled), True))
@@ -580,8 +619,10 @@ def phase_outputs(
             center_lon = unc_df["longitude"].mean()
 
             umap = folium.Map(
-                location=[center_lat, center_lon], zoom_start=6,
+                location=[center_lat, center_lon],
+                zoom_start=6,
                 tiles="CartoDB positron",
+                control_scale=True,
             )
             umap.get_root().html.add_child(folium.Element(f"""
             <div style="position:fixed;top:12px;left:60px;z-index:1000;
@@ -612,6 +653,10 @@ def phase_outputs(
                 w = row["ci_width"]
                 if pd.isna(w):
                     continue
+                geo_html, tip_txt = _lat_lon_parts(row)
+                cid_h = _cell_id_line(row)
+                pred_v = row.get(pred_c)
+                pred_str = f"{float(pred_v):.1f}%" if pd.notna(pred_v) else "N/A"
                 uexplain = row.get("ridge_bdg_popup")
                 if (
                     uexplain is not None
@@ -620,20 +665,24 @@ def phase_outputs(
                 ):
                     uhtml = (
                         f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
+                        f"{cid_h}"
+                        f"{geo_html}"
                         f"CI width: {w:.2f} pp<br>"
                         f"Lower: {row[lower_c]:.1f}%<br>"
                         f"Upper: {row[upper_c]:.1f}%<br>"
-                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%"
+                        f"Prediction: {pred_str}"
                         f"{uexplain}"
                     )
                     uw = 360
                 else:
                     uhtml = (
                         f"<b>{row.get('parish_name', '')} / {row.get('subregion', '')}</b><br>"
+                        f"{cid_h}"
+                        f"{geo_html}"
                         f"CI width: {w:.2f} pp<br>"
                         f"Lower: {row[lower_c]:.1f}%<br>"
                         f"Upper: {row[upper_c]:.1f}%<br>"
-                        f"Prediction: {row.get(pred_c, 'N/A'):.1f}%"
+                        f"Prediction: {pred_str}"
                     )
                     uw = 220
                 folium.CircleMarker(
@@ -644,6 +693,7 @@ def phase_outputs(
                     fill_color=colormap(np.clip(w, vmin, vmax)),
                     fill_opacity=u_opacity,
                     popup=folium.Popup(uhtml, max_width=uw),
+                    tooltip=folium.Tooltip(tip_txt, sticky=True),
                 ).add_to(umap)
 
             unc_html_path = os.path.join(maps_dir, f"{output_prefix}_uncertainty_map.html")

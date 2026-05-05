@@ -17,7 +17,19 @@ These show **multidimensional child deprivation** — predicted **moderate** pre
 
 | File | What it shows | How to read it | Why it’s useful |
 |------|----------------|----------------|-----------------|
-| **`nga_predictions_map_sample.html`** | **Subset** of grid cells (~5k) with MarkerCluster, opacity, legend. Colours (or circle style) encode **Ridge** `ridge_moderate` (or first available model in priority order — see `main.py`). | Pan/zoom; **click a circle** for popup (prediction, sometimes Ridge explain snippet). **Legend** = % moderate deprivation. Lighter/lower vs darker/higher per map styling. | **Default for live demos** — loads fast, readable, same geography as full map. |
+| **`nga_predictions_map_sample.html`** | **Subset** of grid cells (~5k) with MarkerCluster, opacity, legend. Colours (or circle style) encode **Ridge** `ridge_moderate` (or first available model in priority order — see `main.py`). | Pan/zoom; **hover** for lat/lon; **click** for full popup. **Legend** = % moderate deprivation. | **Default for live demos** — loads fast, readable, same geography as full map. |
+
+#### Reading the prediction popup (click a cell)
+
+| Block | What it means |
+|--------|----------------|
+| **LGA / State** (`parish_name` / `subregion`) | Admin labels from the grid join — e.g. which LGA and state contain this grid point. |
+| **Cell ID** | Integer row id in the modelling table (optional line). |
+| **Lat / Lon** | WGS84 coordinates of the **grid point** (5 decimals ≈ 1 m). Use for GIS, Google Earth, or to cite an exact location. |
+| **RWI** | Relative Wealth Index at this point (higher = wealthier in the Meta/WB sense). |
+| **Pop** | Population allocated to this grid cell from WorldPop sampling — can be **0** in very sparsely modelled cells. |
+| **Moderate poverty** | Modelled **moderate multidimensional child deprivation %** for that cell (after state-level reconciliation). |
+| **Ridge (linear) explain** | Short **explainability** block: themes group features (e.g. DHS cluster, wealth, hazards); **Top features** list the largest linear contributions (β×standardised value–style). Positive = pushes deprivation **up**; negative = pushes **down**. Same idea as `nga_prediction_breakdown.csv`. |
 | **`nga_predictions_map.html`** | **All** ~100k+ cell centres as circles — full composite map. | Same as sample but **every** cell; heavy overlap. Use legend and popups. | **Full detail** for screenshots of a subregion you zoom into, or when you need a specific cell; often huge file. |
 | **`nga_comparison_map.html`** *(if present after a full run)* | **LGA polygons** with model vs “truth” / baselines in tooltips. | **Hover** LGAs for **state target vs Ridge (and sometimes RWI)**. Read as **areal** summary, not 100k dots. | **Best stakeholder slide** — clear admin shapes, easy to compare model to survey at LGA scale. |
 | **`nga_uncertainty_map.html`** | **Uncertainty** (CI width or interval) for the **selected** model when CIs were computed. | **Wider** coloured bands or darker = **more uncertain** cell predictions (exact encoding follows legend on map). | Discussing **confidence**; prioritising verification field visits. |
