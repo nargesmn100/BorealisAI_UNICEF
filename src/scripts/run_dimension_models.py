@@ -61,7 +61,7 @@ DIMENSIONS = {
     "shelter":      {"target_col": "shelter_moderate_prev",      "label": "Shelter (overcrowding)"},
     "sanitation":   {"target_col": "sanitation_moderate_prev",   "label": "Sanitation access"},
     "water":        {"target_col": "water_moderate_prev",        "label": "Water access"},
-    "nutrition":    {"target_col": "nutrition_moderate_prev",    "label": "Nutrition (MDD proxy)"},
+    "nutrition":    {"target_col": "nutrition_moderate_prev",    "label": "Nutrition (DHS HAZ stunting)"},
     "edu_5_14":     {"target_col": "edu_5_14_moderate_prev",     "label": "Education 5–14 yrs"},
     "edu_15_17":    {"target_col": "edu_15_17_moderate_prev",    "label": "Education 15–17 yrs"},
     "health":       {"target_col": "health_moderate_prev",       "label": "Health 12–35m (vaccination)"},

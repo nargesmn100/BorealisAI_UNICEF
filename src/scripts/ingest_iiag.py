@@ -36,7 +36,7 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
-IIAG_XLSX = ROOT / "2024-IIAG-scores.xlsx"
+IIAG_XLSX = ROOT / "Data/Nigeria/d1_external/governance/2024-IIAG-scores.xlsx"
 OUT_DIR   = ROOT / "Data/Nigeria/d1_external/governance"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 

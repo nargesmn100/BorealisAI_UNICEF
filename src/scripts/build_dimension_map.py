@@ -1,20 +1,12 @@
 """
-Build 7-Panel Per-Dimension Deprivation Map (LGA Level)
-========================================================
+Build multi-panel Per-Dimension Deprivation Map (LGA Level)
+===========================================================
 
-Creates an interactive multi-panel HTML map showing all 7 Kyriaki
-deprivation dimensions at the LGA polygon level.
+Creates an interactive HTML map with one Leaflet panel per Kyriaki dimension
+plus a composite panel — LGA polygons, population-weighted moderate %.
 
-Each panel shows population-weighted moderate deprivation % for one dimension:
-  1. Shelter (overcrowding)
-  2. Sanitation access
-  3. Water access
-  4. Nutrition (MDD proxy)
-  5. Education 5–14
-  6. Education 15–17
-  7. Health (vaccination)
-
-An 8th panel shows the composite Ridge moderate prediction for comparison.
+Each panel shows predicted **moderate deprivation prevalence** for that
+dimension at LGA level (see generated HTML “How to read this map”).
 
 Usage
 -----
@@ -51,7 +43,7 @@ PANELS = [
     {"col": "shelter_moderate",       "title": "Shelter",              "subtitle": "≥3 persons / sleeping room"},
     {"col": "sanitation_moderate",    "title": "Sanitation",           "subtitle": "Improved but shared toilet"},
     {"col": "water_moderate",         "title": "Water",                "subtitle": "Improved but >30 min roundtrip"},
-    {"col": "nutrition_moderate",     "title": "Nutrition",            "subtitle": "MDD proxy (HAZ not avail.)"},
+    {"col": "nutrition_moderate",     "title": "Nutrition",            "subtitle": "DHS HAZ stunting (moderate)"},
     {"col": "edu_5_14_moderate",      "title": "Education 5–14",       "subtitle": "Not currently attending school"},
     {"col": "edu_15_17_moderate",     "title": "Education 15–17",      "subtitle": "Not in secondary / no sec. completion"},
     {"col": "health_moderate",        "title": "Health 12–35m",        "subtitle": "Missing DPT1–3 or measles vaccine"},
@@ -300,6 +292,61 @@ def build_dimension_map(cfg: dict, output_path: str | None = None) -> str:
           <div id="legend-{idx}" class="panel-legend"></div>
         </div>"""
 
+    # Embedded documentation for stakeholders opening the HTML standalone.
+    doc_section = """
+<section class="map-docs" aria-label="How to read this map">
+  <div class="map-docs-inner">
+    <h2>How to read this map</h2>
+
+    <h3>What does the percentage mean?</h3>
+    <p>
+      Each panel shows a <strong>predicted prevalence (%)</strong> of
+      <strong>moderate deprivation</strong> on <strong>that dimension only</strong>,
+      for <strong>one Local Government Area (LGA)</strong>.
+      The value is a <strong>rate</strong>: “what share of children or youth in the
+      relevant age band meet this dimension’s Kyriaki rule?” — not a score for one child,
+      and not a dollar poverty line.
+    </p>
+    <div class="example">
+      <strong>Example — Education 5–14 shows 60%:</strong>
+      The model estimates that <strong>60% of children aged 5–14</strong> in that LGA are
+      <strong>moderately deprived on education</strong> under this survey definition
+      (here: not currently attending school). Another panel (e.g. Shelter or Nutrition)
+      uses a different rule and age range — percentages are <strong>not comparable</strong>
+      across panels as “severity rank.”
+    </div>
+    <p>
+      Numbers come from <strong>Ridge models</strong> trained on <strong>state-level</strong>
+      survey targets (MICS / DHS where used), then <strong>reconciled</strong> so each state’s
+      population-weighted average matches its official target for that dimension.
+      LGAs are <strong>population-weighted averages</strong> of finer grid cells (~2.4 km spacing).
+    </p>
+
+    <h3>What do the colours mean?</h3>
+    <ul>
+      <li><strong>Each panel has its own colour ramp</strong> (see the coloured panel title bar):
+      pale cream / yellow = <strong>lower</strong> predicted prevalence in that LGA
+      <em>relative to other LGAs in Nigeria on that same dimension</em>;
+      rich hue (purple, green, blue, etc.) = <strong>higher</strong> prevalence.</li>
+      <li>The legend min/max are set from the <strong>2nd–98th percentile</strong> of LGA values
+      <em>for that panel</em> so most maps have visible contrast (the scale is not always 0–100%).</li>
+      <li><strong>Grey</strong> fill = no prediction available for that LGA on that layer.</li>
+    </ul>
+
+    <h3>Composite panel</h3>
+    <p>
+      <strong>Composite (Ridge)</strong> is <strong>not</strong> the sum of the dimension panels.
+      It shows <strong>multidimensional child deprivation</strong> under the MICS composite definition
+      (several domains combined; see project docs). Single-dimension panels answer separate policy questions
+      (water, education, nutrition, etc.).
+    </p>
+    <p style="margin-bottom:0;font-size:0.82rem;color:#555;">
+      <strong>Disclaimer:</strong> Research prototype — not official government statistics.
+    </p>
+  </div>
+</section>
+"""
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -352,6 +399,43 @@ def build_dimension_map(cfg: dict, output_path: str | None = None) -> str:
   }}
   @media (max-width:1100px) {{ .grid {{ grid-template-columns: repeat(2,1fr); }} }}
   @media (max-width:600px)  {{ .grid {{ grid-template-columns: 1fr; }} }}
+  .map-docs {{
+    max-width: 1600px;
+    margin: 12px auto 4px;
+    padding: 0 16px;
+  }}
+  .map-docs-inner {{
+    background: #fff;
+    border: 1px solid #c5cae9;
+    border-radius: 8px;
+    padding: 14px 18px 16px;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: #333;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }}
+  .map-docs-inner h2 {{
+    margin: 0 0 10px 0;
+    font-size: 1.05rem;
+    color: #1a237e;
+    font-weight: 600;
+  }}
+  .map-docs-inner h3 {{
+    margin: 12px 0 6px 0;
+    font-size: 0.92rem;
+    color: #3949ab;
+    font-weight: 600;
+  }}
+  .map-docs-inner p {{ margin: 6px 0; }}
+  .map-docs-inner ul {{ margin: 6px 0 6px 1.1rem; padding: 0; }}
+  .map-docs-inner li {{ margin: 4px 0; }}
+  .map-docs-inner .example {{
+    background: #fff8e1;
+    border-left: 4px solid #ff8f00;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 0.84rem;
+  }}
 </style>
 </head>
 <body>
@@ -361,10 +445,12 @@ def build_dimension_map(cfg: dict, output_path: str | None = None) -> str:
     <p>LGA-level predictions (Ridge regression, Kyriaki specification · May 2026)</p>
   </div>
   <div class="header-meta">
-    7 dimensions · 775 LGAs · 103 k grid cells<br>
+    {n_panels} panels · 775 LGAs · ~103k grid cells<br>
     Click any LGA for full breakdown
   </div>
 </header>
+
+{doc_section}
 
 <div class="grid">
 {panel_grid}
@@ -372,7 +458,7 @@ def build_dimension_map(cfg: dict, output_path: str | None = None) -> str:
 
 <footer>
   UNICEF × RBC Borealis AI · Research prototype · Not official statistics ·
-  Colour = predicted moderate deprivation % · Grey = no data
+  Colours = relative prevalence within each panel · Grey = no data · See box above for % meaning
 </footer>
 
 <script>
@@ -468,7 +554,7 @@ PANELS_META.forEach((meta, idx) => {{
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build 7-panel LGA-level dimension deprivation map."
+        description="Build multi-panel LGA-level dimension + composite comparison map."
     )
     parser.add_argument("--country", default="nga")
     parser.add_argument("--output-path", default=None)

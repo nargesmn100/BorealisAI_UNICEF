@@ -85,8 +85,9 @@ Data/outputs/nga/maps/*.geojson
 Data/outputs/nga/tables/nga_prediction_breakdown.csv
 Data/outputs/nga/tables/nga_predictions.csv
 
-# NBS MPI Stata microdata (restricted / large; ingestion uses selected sections only — see Data/Nigeria/d1_external/README.md)
+# NBS MPI Stata microdata (restricted / large; now at Data/Nigeria/d1_external/nbs_mpi/survey/)
 Nigeria Multidimensional Poverty Index Survey/**/*.dta
+Data/Nigeria/d1_external/nbs_mpi/survey/**/*.dta
 
 # Large derived feature files
 Data/Nigeria/features/nga_osm_buildings.parquet
@@ -182,6 +183,12 @@ NGHR7BFL/
 NGKR7BFL/
 NGGE7BFL/
 Data/Nigeria/dhs/
+
+# IIAG source Excel (large; now at Data/Nigeria/d1_external/governance/)
+Data/Nigeria/d1_external/governance/2024-IIAG-scores.xlsx
+
+# Docs folder (PDFs, reference material)
+docs/*.pdf
 
 # -----------------------------------------------------------------------------
 # Misc

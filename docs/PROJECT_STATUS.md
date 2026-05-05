@@ -433,7 +433,7 @@ On this machine the fix was:
 
 ```bash
 python3 -m git_filter_repo --force \
-  --path 'Nigeria Multidimensional Poverty Index Survey' \
+  --path 'Data/Nigeria/d1_external/nbs_mpi/survey/Nigeria Multidimensional Poverty Index Survey' \
   --path 'Data/outputs/nga/maps/nga_predictions_map.html' \
   --path 'Data/outputs/nga/maps/nga_uncertainty_map.html' \
   --path 'Data/outputs/nga/maps/nga_comparison_map.html' \
@@ -730,8 +730,8 @@ This subsection ties the **master checklist IDs** to plain-language explanations
 | :--- | :--- | :--- |
 | **NEMIS** school listings (`PRE-PRIMARY`, `PRIMARY`, `JSS`, `SSS` `.xlsx`) | Downloaded to `Data/Nigeria/d1_external/nemis/` | **State-level ingestion ✅** (`ingest_nemis.py` → `nga_nemis_state.csv`, merged via `subregion`). **Optional follow-up:** LGA string harmonisation to **GADM ADM2** for true LGA-level cell features (not yet wired). Re-download: `curl -skL` if needed (TLS may require `-k`). |
 | **World Bank** national series | `governance/worldbank_nga_primary_enrollment.json` | Country-level only; API, no login. |
-| **Mo Ibrahim IIAG** | **On repo:** `2024-IIAG-scores.xlsx` | **Country × year** governance scores (not LGA). Correct IIAG product for D1 “governance” national layer. |
-| **NBS MPI microdata** | **On repo:** `Nigeria Multidimensional Poverty Index Survey/*.dta` | **State-level ingestion ✅** (`ingest_nbs_mpi.py` → weighted prevalences by `a1`, joined as `subregion`). **Optional follow-up:** aggregate by `a2` (LGA code) + harmonise to GADM ADM2 for sub-state validation maps. |
+| **Mo Ibrahim IIAG** | `Data/Nigeria/d1_external/governance/2024-IIAG-scores.xlsx` | **Country × year** governance scores (not LGA). Correct IIAG product for D1 “governance” national layer. |
+| **NBS MPI microdata** | `Data/Nigeria/d1_external/nbs_mpi/survey/Nigeria Multidimensional Poverty Index Survey/*.dta` | **State-level ingestion ✅** (`ingest_nbs_mpi.py` → weighted prevalences by `a1`, joined as `subregion`). **Optional follow-up:** aggregate by `a2` (LGA code) + harmonise to GADM ADM2 for sub-state validation maps. |
 
 Large NEMIS `.xlsx` files are listed in **`.gitignore`** so they stay local unless you remove that rule for Git LFS.
 

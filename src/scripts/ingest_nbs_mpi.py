@@ -44,7 +44,7 @@ import pyreadstat
 log = logging.getLogger(__name__)
 
 ROOT    = Path(__file__).resolve().parents[2]
-MPI_DIR = ROOT / "Nigeria Multidimensional Poverty Index Survey"
+MPI_DIR = ROOT / "Data/Nigeria/d1_external/nbs_mpi/survey/Nigeria Multidimensional Poverty Index Survey"
 OUT_DIR = ROOT / "Data/Nigeria/d1_external/nbs_mpi"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 

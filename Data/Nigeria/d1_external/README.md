@@ -1,78 +1,100 @@
-# D1 external datasets — EMIS / governance / NBS LGA
+# D1 external datasets — EMIS / governance / NBS MPI
 
-This folder holds **non-MICS** predictors and validation sources. Files here are **not** wired into `nga_modeling_table.parquet` yet; ingestion is a follow-up task once columns are harmonised to GADM LGA / state.
+This folder holds **non-MICS** external predictors and validation sources ingested into the Nigeria pipeline.
+
+```
+d1_external/
+├── governance/               ← IIAG + World Bank API national indicators
+│   ├── 2024-IIAG-scores.xlsx        (source file; large — gitignored)
+│   ├── nga_iiag_features.csv        (processed per-year scalars)
+│   ├── nga_iiag_latest.csv          (latest year only)
+│   └── worldbank_nga_primary_enrollment.json
+├── nemis/                    ← NEMIS school listings (xlsx raw + derived)
+│   ├── PRE-PRIMARY.xlsx
+│   ├── PRIMARY.xlsx
+│   ├── JSS.xlsx
+│   ├── SSS.xlsx
+│   └── nga_nemis_state.csv   (aggregated state-level features)
+├── nbs_mpi/                  ← NBS MPI household microdata
+│   ├── survey/               ← raw .dta section files (gitignored *.dta)
+│   │   └── Nigeria Multidimensional Poverty Index Survey/
+│   └── nga_nbs_mpi_state.csv (aggregated state-level features)
+├── nga_d1_features.csv       ← combined D1 feature table (state-level)
+└── nga_d1_features.parquet
+```
 
 ---
 
-## 1. Nigeria EMIS (NEMIS) — **partially downloaded**
+## 1. Nigeria EMIS (NEMIS) — `nemis/`
 
 **Official portal:** https://nemis.education.gov.ng/downloads  
-**Mirror page (FME):** https://education.gov.ng/educational-data/
 
-### What we have locally (`nemis/`)
+### What we have locally
 
-Bulk school listings (Excel) were pulled from NEMIS with:
+Bulk school listings (Excel) — download with:
 
 ```bash
 BASE="https://nemis.education.gov.ng"
-curl -skL "$BASE/school/PRE-PRIMARY.xlsx" -o nemis/PRE-PRIMARY.xlsx
-curl -skL "$BASE/school/PRIMARY.xlsx"   -o nemis/PRIMARY.xlsx
-curl -skL "$BASE/school/JSS.xlsx"      -o nemis/JSS.xlsx
-curl -skL "$BASE/school/SSS.xlsx"       -o nemis/SSS.xlsx
+curl -skL "$BASE/school/PRE-PRIMARY.xlsx" -o Data/Nigeria/d1_external/nemis/PRE-PRIMARY.xlsx
+curl -skL "$BASE/school/PRIMARY.xlsx"   -o Data/Nigeria/d1_external/nemis/PRIMARY.xlsx
+curl -skL "$BASE/school/JSS.xlsx"       -o Data/Nigeria/d1_external/nemis/JSS.xlsx
+curl -skL "$BASE/school/SSS.xlsx"       -o Data/Nigeria/d1_external/nemis/SSS.xlsx
 ```
 
-- `-k` is needed on some machines because the site’s TLS chain may not verify with default CA bundles.
-- `PRIMARY.xlsx` includes columns **`STATE`**, **`LGA`**, **`SCHOOL NAME`**, enrolment by grade — suitable for **LGA-level aggregates** after name harmonisation to GADM `NAME_2`.
-
-**Digests / PDFs** (national aggregates, indicators): same downloads page — use a browser for PDFs, e.g. *Nigeria Education Digest 2022*.
-
-**`asc_instruments.zip`:** do **not** use the relative link from the downloads page with `curl` alone; the server returned HTML. Download **Annual School Census** materials through the browser from the same portal if needed.
+`PRIMARY.xlsx` includes columns **`STATE`**, **`LGA`**, **`SCHOOL NAME`**, enrolment by grade — suitable for **LGA-level aggregates** after name harmonisation. Ingested by `src/scripts/ingest_nemis.py`.
 
 ---
 
-## 2. Mo Ibrahim / IIAG governance — **`2024-IIAG-scores.xlsx` (on repo)**
+## 2. Mo Ibrahim / IIAG governance — `governance/2024-IIAG-scores.xlsx`
 
-**Yes — this is the right dataset for the “Mo Ibrahim / IIAG” part of D1.** It is the standard **wide** IIAG export: **one row per country and year**, hundreds of governance indicator columns (overall score, Security & Rule of Law, etc.). **There is no LGA breakdown** in IIAG; Nigeria is one row per year. Use it as **national context** (scalar features or documentation), not for within-Nigeria LGA disaggregation.
+Standard **wide** IIAG export: one row per country and year, hundreds of governance indicator columns. **No LGA breakdown** — Nigeria is one row per year; used as **national-context** scalar features.
 
-**Path:** project root `2024-IIAG-scores.xlsx` (sheet `Sheet1`). Rows 0–5 are metadata; **data start around row 6** with `Country`, `Year`, then scores.
-
-**Updates / other years:** https://iiag.online/downloads.html (browser; Cloudflare may block `curl`).
+**Ingestion script:** `src/scripts/ingest_iiag.py`  
+**Updates:** https://iiag.online/downloads.html
 
 ---
 
-## 3. NBS MPI microdata — **`Nigeria Multidimensional Poverty Index Survey/` (on repo)**
+## 3. NBS MPI microdata — `nbs_mpi/survey/`
 
-**Yes — this is exactly what we meant by “NBS MPI microdata” for LGA-linked poverty / deprivation.** The folder of Stata **`.dta`** section files is the **Nigeria Multidimensional Poverty Index Survey** microdata (household + modules). For the pipeline, the critical file is:
+The **Nigeria Multidimensional Poverty Index Survey** Stata `.dta` section files (household + modules). Critical files:
 
 | File | Role |
 | :--- | :--- |
-| **`SECTION A _ IDENTIFICATION.dta`** | `hh_id`, survey weights (`hh_wgt`, `pop_wgt`, …), and **geographic fields** (`a1`, `a2`, … — state / LGA / EA per NBS documentation). Use these to **aggregate to LGA** and join to GADM `NAME_2` after harmonising labels. |
-| Other `SECTION *.dta` | Health, housing, food security, etc. — optional inputs if you derive **LGA-level summary statistics** as extra predictors or validation targets. |
+| `SECTION A _ IDENTIFICATION.dta` | `hh_id`, survey weights, geographic fields (`a1`/`a2` = state/LGA) |
+| `SECTION J_HOUSING CHARACTERISTICS_NEW.dta` | floor quality etc. |
+| `SECTION I_ WATER AND SANITATION.dta` | WASH indicators |
+| `SECTION E_FOOD SECURITY.dta` | HFIAS food security |
+| `SECTION F_HEALTH.dta` | health facility access |
 
-**Path:** repo root folder `Nigeria Multidimensional Poverty Index Survey/` (21 section `.dta` files).
-
+**Ingestion script:** `src/scripts/ingest_nbs_mpi.py`  
 **Catalogue:** https://microdata.nigerianstat.gov.ng/index.php/catalog/71  
-
-**Licence / Git:** If your NBS access terms **forbid redistribution**, keep `.dta` files **local** or in a **private** bucket and add the folder to `.gitignore` for public repos.
-
-**Aggregated tables:** https://www.nigerianstat.gov.ng/ — published PDF/Excel as available.
+**Note:** `.dta` files are gitignored (restricted licence / large).
 
 ---
 
-## 4. National proxies (API) — `governance/worldbank_nga_primary_enrollment.json`
+## 4. National proxy (API) — `governance/worldbank_nga_primary_enrollment.json`
 
-**World Bank API** (no key, national time series — **not** LGA):
-
-```text
+World Bank API (no key, national time series):
+```
 https://api.worldbank.org/v2/country/NGA/indicator/SE.PRM.ENRR?format=json&per_page=100
 ```
-
-Saved as JSON for convenience. Useful as a **single-country trend** control, not for disaggregation.
+Useful as single-country trend control, not for disaggregation.
 
 ---
 
-## Next step for the pipeline
+## Ingestion pipeline
 
-1. Build a script that reads `nemis/*.xlsx`, normalises `STATE` / `LGA` strings to GADM, aggregates counts → `nga_emis_lga_features.csv`.  
-2. Join that parquet/CSV into the grid feature build (same pattern as MICS state aggregates).  
-3. Register new column names under `modeling.features` in `config_nga.yaml`.
+Run in order (or use the orchestrator):
+
+```bash
+python src/scripts/ingest_iiag.py
+python src/scripts/ingest_nbs_mpi.py
+python src/scripts/ingest_nemis.py
+python src/scripts/ingest_d1_features.py   # merges all above into modeling table
+python main.py --country nga               # full pipeline
+```
+
+## Next steps
+
+- **NEMIS/NBS LGA harmonisation:** join `a2` LGA codes / `LGA` strings to GADM ADM2 (`NAME_2`) — currently state-level only.
+- **GBM SHAP:** enable `export_gbm_shap: true` in `config_nga.yaml`.
