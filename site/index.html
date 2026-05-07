@@ -232,7 +232,7 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
-  fetch('/site/drive_links.json')
+  fetch('/drive_links.json')
     .then(r => r.json())
     .then(links => {
       document.getElementById('portal').innerHTML = buildPortal(links);
