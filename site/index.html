@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Borealis × UNICEF — Nigeria Child Deprivation Maps</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, Arial, sans-serif; background: #f0f4f9; color: #1f2937; }
+
+    header {
+      background: linear-gradient(135deg, #0b3b6e, #1a6fbf);
+      color: #fff;
+      padding: 22px 28px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 1.25rem; }
+    header .sub { font-size: 12px; opacity: .75; margin-top: 4px; }
+    .badge { background: rgba(255,255,255,.2); padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 22px 18px; }
+
+    section { margin-bottom: 28px; }
+    section h2 { font-size: 1rem; font-weight: 700; color: #374151; margin-bottom: 12px;
+                 padding-bottom: 6px; border-bottom: 2px solid #dbeafe; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.09);
+      padding: 14px 16px;
+      transition: box-shadow .15s;
+    }
+    .card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.13); }
+
+    .card-title { font-weight: 700; font-size: .93rem; margin-bottom: 4px; }
+    .card-desc  { font-size: .78rem; color: #6b7280; margin-bottom: 10px; line-height: 1.45; }
+
+    .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-primary { background: #1a6fbf; color: #fff; }
+    .btn-primary:hover { background: #1558a0; }
+    .btn-secondary { background: #e5edfa; color: #1a6fbf; border: 1px solid #bfcfe8; }
+    .btn-secondary:hover { background: #d0e0f5; }
+    .btn-disabled { background: #f3f4f6; color: #9ca3af; cursor: default; border: 1px solid #e5e7eb; pointer-events: none; }
+
+    .tag {
+      display: inline-block;
+      background: #dbeafe; color: #1e40af;
+      padding: 1px 8px; border-radius: 999px; font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .tag.orange { background: #fef3c7; color: #92400e; }
+    .tag.green  { background: #d1fae5; color: #065f46; }
+    .tag.red    { background: #fee2e2; color: #991b1b; }
+
+    .size-note { font-size: 10px; color: #9ca3af; margin-top: 4px; }
+
+    #status-banner {
+      background: #fef9c3; border: 1px solid #fde047; border-radius: 8px;
+      padding: 10px 14px; margin-bottom: 20px; font-size: 13px; display: none;
+    }
+
+    footer { text-align: center; color: #9ca3af; font-size: 11px; padding: 24px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Borealis AI × UNICEF — Nigeria Child Deprivation</h1>
+      <div class="sub">Interactive map portal for stakeholder demo outputs · May 2026</div>
+    </div>
+    <span class="badge">Research use only</span>
+  </header>
+
+  <main>
+    <div id="status-banner"></div>
+    <div id="portal"></div>
+  </main>
+
+  <footer>
+    UNICEF × Borealis AI · Nigeria child deprivation pipeline · Research tool only, not official statistics
+  </footer>
+
+  <script>
+  // ── Google Drive helpers ──────────────────────────────────────────────────
+  const PLACEHOLDER = "PASTE_FILE_ID_HERE";
+
+  function driveView(id) {
+    return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
+  }
+  function drivePreview(id) {
+    // Renders HTML files inline in the browser
+    return `https://drive.google.com/file/d/${id}/preview`;
+  }
+  function driveFolder(id) {
+    return `https://drive.google.com/drive/folders/${id}?usp=sharing`;
+  }
+
+  function isSet(id) {
+    return id && id !== PLACEHOLDER && id.length > 10;
+  }
+
+  // ── Card builder ──────────────────────────────────────────────────────────
+  function makeCard({ title, desc, tag, tagStyle, fileId, sizeNote }) {
+    const tagHtml = tag ? `<span class="tag ${tagStyle||''}">${tag}</span>` : '';
+    const hasDrive = isSet(fileId);
+    const openBtn = hasDrive
+      ? `<a class="btn btn-primary" href="${drivePreview(fileId)}" target="_blank">Open map ↗</a>`
+      : `<span class="btn btn-disabled">Awaiting upload</span>`;
+    const dlBtn = hasDrive
+      ? `<a class="btn btn-secondary" href="${driveView(fileId)}" target="_blank">Drive ↗</a>`
+      : '';
+    const size = sizeNote ? `<div class="size-note">${sizeNote}</div>` : '';
+    return `
+      <div class="card">
+        ${tagHtml}
+        <div class="card-title">${title}</div>
+        <div class="card-desc">${desc}</div>
+        <div class="btn-row">${openBtn}${dlBtn}</div>
+        ${size}
+      </div>`;
+  }
+
+  // ── Page builder ─────────────────────────────────────────────────────────
+  function buildPortal(links) {
+    const m = links.maps || {};
+    const d = links.docs || {};
+    const t = links.tables || {};
+    const folderBtn = isSet(links.root_folder_id)
+      ? `<a class="btn btn-secondary" href="${driveFolder(links.root_folder_id)}" target="_blank">📁 Open Drive folder ↗</a>`
+      : '';
+
+    const pendingCount = Object.values({...m, ...d, ...t})
+      .filter(id => !isSet(id)).length;
+
+    if (pendingCount > 0) {
+      const banner = document.getElementById('status-banner');
+      banner.style.display = 'block';
+      banner.innerHTML = `⚠️ <b>${pendingCount} file(s)</b> not yet uploaded to Drive.
+        See <code>WHAT_TO_UPLOAD.md</code> for instructions,
+        then paste IDs into <code>site/drive_links.json</code> and redeploy.`;
+    }
+
+    return `
+      ${folderBtn ? `<div style="margin-bottom:16px">${folderBtn}</div>` : ''}
+
+      <section>
+        <h2>📍 Demo Starter Pack</h2>
+        <div class="grid">
+          ${makeCard({
+            title: 'Stakeholder Demo Script',
+            desc: 'Business + technical walkthrough. Start here before opening maps.',
+            tag: 'Script', tagStyle: 'green',
+            fileId: d.stakeholder_demo_script,
+            sizeNote: '< 1 MB'
+          })}
+          ${makeCard({
+            title: 'NGA Predictions Map (Sample)',
+            desc: 'Lighter grid-point map for live demos. Clustered circles — composite deprivation score.',
+            tag: 'Demo', tagStyle: '',
+            fileId: m.nga_predictions_map_sample,
+            sizeNote: '~7 MB'
+          })}
+          ${makeCard({
+            title: 'NGA Comparison Map',
+            desc: 'Model outputs + feature layers at LGA level. Includes raw resolution dot layers.',
+            tag: 'Full detail',
+            fileId: m.nga_comparison_map,
+            sizeNote: '~238 MB — large, may take a moment'
+          })}
+          ${makeCard({
+            title: 'Dimension Comparison Map',
+            desc: 'All 8 deprivation dimensions in one panel.',
+            tag: 'Overview',
+            fileId: m.nga_dimension_comparison_map,
+            sizeNote: '~16 MB'
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h2>🏥 Individual Dimension Maps</h2>
+        <div class="grid">
+          ${makeCard({ title: 'Shelter', desc: 'Housing quality deprivation by LGA.', fileId: m.nga_dimension_shelter, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Sanitation', desc: 'Sanitation deprivation by LGA.', fileId: m.nga_dimension_sanitation, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Water', desc: 'Drinking water deprivation by LGA.', fileId: m.nga_dimension_water, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Nutrition (HAZ)', desc: 'Child stunting / nutrition deprivation.', fileId: m.nga_dimension_nutrition, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Education 5–14', desc: 'School attendance gap, children 5–14.', fileId: m.nga_dimension_edu_5_14, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Education 15–17', desc: 'Secondary attendance gap, ages 15–17.', fileId: m.nga_dimension_edu_15_17, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Health 12–35m', desc: 'Child health services deprivation (12–35 months).', fileId: m.nga_dimension_health, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Health 36–59m', desc: 'Child health services deprivation (36–59 months).', fileId: m.nga_dimension_health_36_59, sizeNote: '~5 MB' })}
+        </div>
+      </section>
+
+      <section>
+        <h2>📂 Additional Outputs</h2>
+        <div class="grid">
+          ${makeCard({
+            title: 'NGA Predictions Map (Full)',
+            desc: 'All 103k grid cells. Very large — use sample map for demos.',
+            tag: 'Heavy', tagStyle: 'red',
+            fileId: m.nga_predictions_map,
+            sizeNote: '~133 MB'
+          })}
+          ${makeCard({
+            title: 'Uncertainty Map',
+            desc: '90% confidence interval width per cell.',
+            tag: 'Heavy', tagStyle: 'red',
+            fileId: m.nga_uncertainty_map,
+            sizeNote: '~134 MB'
+          })}
+          ${makeCard({
+            title: 'LGA Predictions CSV',
+            desc: 'Flat table of all 775 LGAs with ridge predictions, themes, and population.',
+            tag: 'Data', tagStyle: 'orange',
+            fileId: t.nga_lga_predictions_csv,
+            sizeNote: '< 1 MB'
+          })}
+        </div>
+      </section>`;
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  fetch('/site/drive_links.json')
+    .then(r => r.json())
+    .then(links => {
+      document.getElementById('portal').innerHTML = buildPortal(links);
+    })
+    .catch(() => {
+      document.getElementById('portal').innerHTML =
+        '<p style="color:#b91c1c;padding:20px">Could not load drive_links.json. Make sure the file exists.</p>';
+    });
+  </script>
+</body>
+</html>

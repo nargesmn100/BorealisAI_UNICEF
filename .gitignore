@@ -197,3 +197,6 @@ docs/*.pdf
 *.swp
 *.swo
 *~
+.vercel
+# Export archives (large — share via Drive instead)
+Data/exports/

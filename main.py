@@ -708,7 +708,7 @@ def phase_outputs(
         logger.warning("Could not save uncertainty map: %s", e)
 
     # ------------------------------------------------------------------
-    # LGA-level aggregation (Nigeria only — GADM ADM2)
+    # LGA-level aggregation + comparison map (Nigeria only — GADM ADM2)
     # ------------------------------------------------------------------
     country_code = cfg.get("country", {}).get("code", "")
     if country_code == "NGA":
@@ -721,6 +721,13 @@ def phase_outputs(
                 logger.info("LGA GeoJSON saved to: %s", lga_geojson)
         except Exception as e:
             logger.warning("LGA aggregation failed: %s", e)
+
+        # Build the multi-panel comparison map (requires LGA GeoJSON above)
+        try:
+            from src.scripts.build_comparison_map import run as build_comparison_map
+            build_comparison_map(cfg)
+        except Exception as e:
+            logger.warning("Comparison map generation failed (non-fatal): %s", e)
 
     logger.info("All outputs saved to: %s", cfg["paths"]["outputs_dir"])
 
