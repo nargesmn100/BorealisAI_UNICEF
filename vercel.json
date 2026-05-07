@@ -2,9 +2,12 @@
   "cleanUrls": false,
   "trailingSlash": false,
   "rewrites": [
+    { "source": "/", "destination": "/site/index.html" }
+  ],
+  "headers": [
     {
-      "source": "/",
-      "destination": "/site/index.html"
+      "source": "/site/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
     }
   ]
 }

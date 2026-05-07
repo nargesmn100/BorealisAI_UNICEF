@@ -1,0 +1,14 @@
+Data/
+docs/
+notebooks/
+src/
+tests/
+config/
+visualization/
+*.md
+*.txt
+*.yaml
+*.yml
+*.py
+requirements.txt
+CLAUDE.md
