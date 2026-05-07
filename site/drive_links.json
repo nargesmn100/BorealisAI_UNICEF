@@ -1,25 +1,25 @@
 {
-  "_instructions": "Auto-populated from Google Drive folder 1MHvzxuEg9GwyhLIoFOcW_kalQD2v94nv",
+  "_instructions": "drive_id = Google Drive file ID (download). netlify_url = live rendered URL from netlify.com/drop (paste after uploading). netlify_url takes priority for Open Map button.",
   "root_folder_id": "1MHvzxuEg9GwyhLIoFOcW_kalQD2v94nv",
   "maps": {
-    "nga_predictions_map_sample":   "1pfdAM9wG7RLGdV0pk87SoURq2TesX0Gn",
-    "nga_comparison_map":           "1XIc771_NUF2uTyhn2VqWNI184pqyI1OG",
-    "nga_dimension_comparison_map": "1Ydt3RLFMhV9QfRKeNc2_S25OfGLm2zTu",
-    "nga_predictions_map":          "1tsNtypRxPLhIfMwnZKY07x1z_rKXkqRn",
-    "nga_uncertainty_map":          "1x2TONz1hZXE-UrhtgXkK7jPXH4ymZdrC",
-    "nga_dimension_shelter":        "1CDWBwPYwleXINO4y4QZ8_pokG6kahWr9",
-    "nga_dimension_sanitation":     "1SoLOBvAzUxv-vTYeyMAW88E75hi8lQYb",
-    "nga_dimension_water":          "1O8W8kBn8pHeeWE7FEniFoW3x0X128tKa",
-    "nga_dimension_nutrition":      "1VBE9j2Hcl6OEewUe1nOXExZY3sYfq6zb",
-    "nga_dimension_edu_5_14":       "1e0ePL7x9EcRl7XT4_MoFz2NX8l6tPbo3",
-    "nga_dimension_edu_15_17":      "1w-C5tJ4FXkpJYXrxtMvUJ1NHOjmQqrwV",
-    "nga_dimension_health":         "1Boa3Njdp0BLq956_1k4gZ-6gVxMIMytI",
-    "nga_dimension_health_36_59":   "1aFpXNL_GZ_VzhTRS7OPLTC1z5fnmBwUL"
+    "nga_predictions_map_sample":   { "drive_id": "1pfdAM9wG7RLGdV0pk87SoURq2TesX0Gn", "netlify_url": "" },
+    "nga_comparison_map":           { "drive_id": "1XIc771_NUF2uTyhn2VqWNI184pqyI1OG", "netlify_url": "" },
+    "nga_dimension_comparison_map": { "drive_id": "1Ydt3RLFMhV9QfRKeNc2_S25OfGLm2zTu", "netlify_url": "" },
+    "nga_predictions_map":          { "drive_id": "1tsNtypRxPLhIfMwnZKY07x1z_rKXkqRn", "netlify_url": "" },
+    "nga_uncertainty_map":          { "drive_id": "1x2TONz1hZXE-UrhtgXkK7jPXH4ymZdrC", "netlify_url": "" },
+    "nga_dimension_shelter":        { "drive_id": "1CDWBwPYwleXINO4y4QZ8_pokG6kahWr9", "netlify_url": "" },
+    "nga_dimension_sanitation":     { "drive_id": "1SoLOBvAzUxv-vTYeyMAW88E75hi8lQYb", "netlify_url": "" },
+    "nga_dimension_water":          { "drive_id": "1O8W8kBn8pHeeWE7FEniFoW3x0X128tKa", "netlify_url": "" },
+    "nga_dimension_nutrition":      { "drive_id": "1VBE9j2Hcl6OEewUe1nOXExZY3sYfq6zb", "netlify_url": "" },
+    "nga_dimension_edu_5_14":       { "drive_id": "1e0ePL7x9EcRl7XT4_MoFz2NX8l6tPbo3", "netlify_url": "" },
+    "nga_dimension_edu_15_17":      { "drive_id": "1w-C5tJ4FXkpJYXrxtMvUJ1NHOjmQqrwV", "netlify_url": "" },
+    "nga_dimension_health":         { "drive_id": "1Boa3Njdp0BLq956_1k4gZ-6gVxMIMytI", "netlify_url": "" },
+    "nga_dimension_health_36_59":   { "drive_id": "1aFpXNL_GZ_VzhTRS7OPLTC1z5fnmBwUL", "netlify_url": "" }
   },
   "docs": {
-    "stakeholder_demo_script":      "1Mz4xIUirQ9QhuoLfZTtfCPvtZOBH2XlF"
+    "stakeholder_demo_script":      { "drive_id": "1Mz4xIUirQ9QhuoLfZTtfCPvtZOBH2XlF", "netlify_url": "" }
   },
   "tables": {
-    "nga_lga_predictions_csv":      "1-AI8o_4d2oOS6ZkgglDFldDyfQ7oXW7p"
+    "nga_lga_predictions_csv":      { "drive_id": "1-AI8o_4d2oOS6ZkgglDFldDyfQ7oXW7p", "netlify_url": "" }
   }
 }

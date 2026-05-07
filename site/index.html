@@ -93,34 +93,49 @@
   </footer>
 
   <script>
-  // ── Google Drive helpers ──────────────────────────────────────────────────
-  const PLACEHOLDER = "PASTE_FILE_ID_HERE";
-
-  function driveView(id) {
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function driveDownload(id) {
     return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
-  }
-  function drivePreview(id) {
-    // Renders HTML files inline in the browser
-    return `https://drive.google.com/file/d/${id}/preview`;
   }
   function driveFolder(id) {
     return `https://drive.google.com/drive/folders/${id}?usp=sharing`;
   }
+  function isSet(v) {
+    return v && v.length > 6 && !v.startsWith('PASTE');
+  }
 
-  function isSet(id) {
-    return id && id !== PLACEHOLDER && id.length > 10;
+  // entry is either a string (legacy) or { drive_id, netlify_url }
+  function getIds(entry) {
+    if (!entry) return { drive_id: null, netlify_url: null };
+    if (typeof entry === 'string') return { drive_id: entry, netlify_url: null };
+    return { drive_id: entry.drive_id || null, netlify_url: entry.netlify_url || null };
   }
 
   // ── Card builder ──────────────────────────────────────────────────────────
-  function makeCard({ title, desc, tag, tagStyle, fileId, sizeNote }) {
+  function makeCard({ title, desc, tag, tagStyle, entry, sizeNote }) {
+    const { drive_id, netlify_url } = getIds(entry);
+    const hasNetlify = isSet(netlify_url);
+    const hasDrive   = isSet(drive_id);
+
     const tagHtml = tag ? `<span class="tag ${tagStyle||''}">${tag}</span>` : '';
-    const hasDrive = isSet(fileId);
-    const openBtn = hasDrive
-      ? `<a class="btn btn-primary" href="${drivePreview(fileId)}" target="_blank">Open map ↗</a>`
-      : `<span class="btn btn-disabled">Awaiting upload</span>`;
+
+    let openBtn;
+    if (hasNetlify) {
+      openBtn = `<a class="btn btn-primary" href="${netlify_url}" target="_blank">Open map ↗</a>`;
+    } else if (hasDrive) {
+      openBtn = `<a class="btn btn-primary" title="Download then open in browser" href="${driveDownload(drive_id)}" target="_blank">⬇ Download & open</a>`;
+    } else {
+      openBtn = `<span class="btn btn-disabled">Awaiting upload</span>`;
+    }
+
     const dlBtn = hasDrive
-      ? `<a class="btn btn-secondary" href="${driveView(fileId)}" target="_blank">Drive ↗</a>`
+      ? `<a class="btn btn-secondary" href="${driveDownload(drive_id)}" target="_blank">Drive ↗</a>`
       : '';
+
+    const netlifyNote = !hasNetlify && hasDrive
+      ? `<div class="size-note" style="color:#b45309">⚠ Not yet on Netlify — will download, not open in browser</div>`
+      : '';
+
     const size = sizeNote ? `<div class="size-note">${sizeNote}</div>` : '';
     return `
       <div class="card">
@@ -128,6 +143,7 @@
         <div class="card-title">${title}</div>
         <div class="card-desc">${desc}</div>
         <div class="btn-row">${openBtn}${dlBtn}</div>
+        ${netlifyNote}
         ${size}
       </div>`;
   }
@@ -162,28 +178,28 @@
             title: 'Stakeholder Demo Script',
             desc: 'Business + technical walkthrough. Start here before opening maps.',
             tag: 'Script', tagStyle: 'green',
-            fileId: d.stakeholder_demo_script,
+            entry: d.stakeholder_demo_script,
             sizeNote: '< 1 MB'
           })}
           ${makeCard({
             title: 'NGA Predictions Map (Sample)',
             desc: 'Lighter grid-point map for live demos. Clustered circles — composite deprivation score.',
             tag: 'Demo', tagStyle: '',
-            fileId: m.nga_predictions_map_sample,
+            entry: m.nga_predictions_map_sample,
             sizeNote: '~7 MB'
           })}
           ${makeCard({
             title: 'NGA Comparison Map',
             desc: 'Model outputs + feature layers at LGA level. Includes raw resolution dot layers.',
             tag: 'Full detail',
-            fileId: m.nga_comparison_map,
+            entry: m.nga_comparison_map,
             sizeNote: '~238 MB — large, may take a moment'
           })}
           ${makeCard({
             title: 'Dimension Comparison Map',
             desc: 'All 8 deprivation dimensions in one panel.',
             tag: 'Overview',
-            fileId: m.nga_dimension_comparison_map,
+            entry: m.nga_dimension_comparison_map,
             sizeNote: '~16 MB'
           })}
         </div>
@@ -192,14 +208,14 @@
       <section>
         <h2>🏥 Individual Dimension Maps</h2>
         <div class="grid">
-          ${makeCard({ title: 'Shelter', desc: 'Housing quality deprivation by LGA.', fileId: m.nga_dimension_shelter, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Sanitation', desc: 'Sanitation deprivation by LGA.', fileId: m.nga_dimension_sanitation, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Water', desc: 'Drinking water deprivation by LGA.', fileId: m.nga_dimension_water, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Nutrition (HAZ)', desc: 'Child stunting / nutrition deprivation.', fileId: m.nga_dimension_nutrition, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Education 5–14', desc: 'School attendance gap, children 5–14.', fileId: m.nga_dimension_edu_5_14, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Education 15–17', desc: 'Secondary attendance gap, ages 15–17.', fileId: m.nga_dimension_edu_15_17, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Health 12–35m', desc: 'Child health services deprivation (12–35 months).', fileId: m.nga_dimension_health, sizeNote: '~5 MB' })}
-          ${makeCard({ title: 'Health 36–59m', desc: 'Child health services deprivation (36–59 months).', fileId: m.nga_dimension_health_36_59, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Shelter', desc: 'Housing quality deprivation by LGA.', entry: m.nga_dimension_shelter, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Sanitation', desc: 'Sanitation deprivation by LGA.', entry: m.nga_dimension_sanitation, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Water', desc: 'Drinking water deprivation by LGA.', entry: m.nga_dimension_water, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Nutrition (HAZ)', desc: 'Child stunting / nutrition deprivation.', entry: m.nga_dimension_nutrition, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Education 5–14', desc: 'School attendance gap, children 5–14.', entry: m.nga_dimension_edu_5_14, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Education 15–17', desc: 'Secondary attendance gap, ages 15–17.', entry: m.nga_dimension_edu_15_17, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Health 12–35m', desc: 'Child health services deprivation (12–35 months).', entry: m.nga_dimension_health, sizeNote: '~5 MB' })}
+          ${makeCard({ title: 'Health 36–59m', desc: 'Child health services deprivation (36–59 months).', entry: m.nga_dimension_health_36_59, sizeNote: '~5 MB' })}
         </div>
       </section>
 
@@ -210,21 +226,21 @@
             title: 'NGA Predictions Map (Full)',
             desc: 'All 103k grid cells. Very large — use sample map for demos.',
             tag: 'Heavy', tagStyle: 'red',
-            fileId: m.nga_predictions_map,
+            entry: m.nga_predictions_map,
             sizeNote: '~133 MB'
           })}
           ${makeCard({
             title: 'Uncertainty Map',
             desc: '90% confidence interval width per cell.',
             tag: 'Heavy', tagStyle: 'red',
-            fileId: m.nga_uncertainty_map,
+            entry: m.nga_uncertainty_map,
             sizeNote: '~134 MB'
           })}
           ${makeCard({
             title: 'LGA Predictions CSV',
             desc: 'Flat table of all 775 LGAs with ridge predictions, themes, and population.',
             tag: 'Data', tagStyle: 'orange',
-            fileId: t.nga_lga_predictions_csv,
+            entry: t.nga_lga_predictions_csv,
             sizeNote: '< 1 MB'
           })}
         </div>
